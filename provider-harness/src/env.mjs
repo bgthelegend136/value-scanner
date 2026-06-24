@@ -17,10 +17,14 @@ export async function loadEnvFile(path) {
   return values;
 }
 
-export function requireApiKey(env) {
-  const key = env.ODDS_API_IO_KEY?.trim();
-  if (!key) {
-    throw new Error("ODDS_API_IO_KEY is missing from .env.local");
+export function requireKey(env, name) {
+  const value = env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is missing from .env.local`);
   }
-  return key;
+  return value;
+}
+
+export function requireApiKey(env) {
+  return requireKey(env, "ODDS_API_IO_KEY");
 }

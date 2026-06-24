@@ -30,3 +30,18 @@ test("requires a non-empty API key without leaking supplied values", () => {
     assert.doesNotMatch(error.message, new RegExp(key));
   }
 });
+
+test("requireKey reads a named key and never leaks supplied values", async () => {
+  const { requireKey } = await import("../src/env.mjs");
+  assert.equal(requireKey({ THE_ODDS_API_KEY: " abc " }, "THE_ODDS_API_KEY"), "abc");
+  assert.throws(
+    () => requireKey({}, "THE_ODDS_API_KEY"),
+    /THE_ODDS_API_KEY is missing from \.env\.local/,
+  );
+  const secret = "sensitive-value";
+  try {
+    requireKey({ THE_ODDS_API_KEY: "  " }, "THE_ODDS_API_KEY", secret);
+  } catch (error) {
+    assert.doesNotMatch(error.message, new RegExp(secret));
+  }
+});
