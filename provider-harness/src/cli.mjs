@@ -7,12 +7,24 @@ import { promisify } from "node:util";
 import { createOddsApiClient } from "./client.mjs";
 import { compareObservation, summarizeComparisons } from "./compare.mjs";
 import { readCsv, writeCsv } from "./csv.mjs";
-import { loadEnvFile, requireApiKey } from "./env.mjs";
+import { loadEnvFile, requireApiKey, requireKey } from "./env.mjs";
 import { normalizeOddsResponse } from "./normalize.mjs";
+import { createTheOddsApiClient } from "./theodds_client.mjs";
+import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
+import { matchFixtures } from "./match.mjs";
+import { findValueBets } from "./value.mjs";
+import { formatAlert } from "./alert.mjs";
 
 const execFileAsync = promisify(execFile);
 
 const TARGET_BOOKMAKERS = ["Superbet", "Stoiximan"];
+const WORLD_CUP_SPORT_KEY = "soccer_fifa_world_cup";
+const REFERENCE_BOOKMAKER = "pinnacle";
+const SCAN_COLUMNS = [
+  "bookmaker", "eventId", "kickoffUtc", "homeTeam", "awayTeam",
+  "market", "line", "outcome", "decimalOdds", "fairOdds", "fairProbability",
+  "ev", "status",
+];
 
 const CANONICAL_COLUMNS = [
   "provider",
@@ -89,6 +101,12 @@ async function defaultLoadApiKey() {
   const envPath = await resolveEnvPath(process.cwd());
   const env = await loadEnvFile(envPath);
   return requireApiKey(env);
+}
+
+async function defaultLoadTheOddsKey() {
+  const envPath = await resolveEnvPath(process.cwd());
+  const env = await loadEnvFile(envPath);
+  return requireKey(env, "THE_ODDS_API_KEY");
 }
 
 function formatRateLimit(rateLimit) {
@@ -200,12 +218,95 @@ async function runEvaluate(csvPath, { out, reportsDir, now }) {
   return 0;
 }
 
+function toFixtureList(events, shape) {
+  return events.map(shape).filter((e) => e.homeTeam && e.awayTeam && e.kickoffUtc);
+}
+
+function scanRow(result) {
+  return {
+    bookmaker: result.bookmaker,
+    eventId: result.eventId,
+    kickoffUtc: result.kickoffUtc ?? "",
+    homeTeam: result.homeTeam ?? "",
+    awayTeam: result.awayTeam ?? "",
+    market: result.market,
+    line: result.line,
+    outcome: result.outcome,
+    decimalOdds: result.decimalOdds,
+    fairOdds: result.fairOdds !== undefined ? result.fairOdds.toFixed(4) : "",
+    fairProbability: result.fairProbability !== undefined ? result.fairProbability.toFixed(4) : "",
+    ev: result.ev !== undefined ? result.ev.toFixed(4) : "",
+    status: result.status,
+  };
+}
+
+async function runScan({
+  loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
+}) {
+  const oddsClient = createClient({ apiKey: await loadApiKey() });
+  const theOddsClient = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+
+  const referenceEventsRaw = await theOddsClient.listEvents({ sportKey: WORLD_CUP_SPORT_KEY });
+  const referenceFixtures = toFixtureList(referenceEventsRaw.data ?? [], (e) => ({
+    eventId: String(e.id), homeTeam: e.home_team, awayTeam: e.away_team, kickoffUtc: e.commence_time,
+  }));
+
+  const oddsEventsRaw = await oddsClient.listEvents({ sport: "football", limit: 50 });
+  const oddsEvents = Array.isArray(oddsEventsRaw.data) ? oddsEventsRaw.data : oddsEventsRaw.data?.events ?? [];
+  const worldCupOddsEvents = oddsEvents.filter((e) =>
+    /world\s*cup|mundial/iu.test(String(e.league?.name ?? e.league ?? "")),
+  );
+  const bettableFixtures = toFixtureList(
+    worldCupOddsEvents.length > 0 ? worldCupOddsEvents : oddsEvents,
+    (e) => ({ eventId: String(e.id), homeTeam: e.home, awayTeam: e.away, kickoffUtc: e.date }),
+  );
+
+  const pairs = matchFixtures(referenceFixtures, bettableFixtures);
+
+  const referenceOdds = await theOddsClient.getOdds({ sportKey: WORLD_CUP_SPORT_KEY });
+  const referenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt)
+    .filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
+
+  const alerts = [];
+  const reportRows = [];
+  for (const pair of pairs) {
+    const refForFixture = referenceSelections.filter((s) => s.eventId === pair.referenceEventId);
+    if (refForFixture.length === 0) continue;
+
+    const oddsResponse = await oddsClient.getOdds({
+      eventId: String(pair.bettableEventId),
+      bookmakers: TARGET_BOOKMAKERS,
+    });
+    const bettable = normalizeOddsResponse(oddsResponse.data, oddsResponse.receivedAt)
+      .filter((row) => TARGET_BOOKMAKERS.includes(row.bookmaker) && (row.market === "MATCH_RESULT" || row.market === "TOTALS"));
+
+    for (const result of findValueBets(bettable, refForFixture, { threshold })) {
+      if (result.status === "NO_REFERENCE") continue;
+      if (result.status === "NO_VALUE") { reportRows.push(scanRow(result)); continue; }
+      reportRows.push(scanRow(result));
+      alerts.push(formatAlert(result, { fixture: pair }));
+    }
+  }
+
+  const header = `World Cup value scan — ${pairs.length} matched fixtures, ${alerts.length} alerts (EV >= ${(threshold * 100).toFixed(1)}%).`;
+  out(`${header}\n\n`);
+  for (const alert of alerts) out(`${alert}\n\n`);
+  out(`The Odds API quota remaining: ${referenceOdds.quota?.remaining ?? "?"}\n`);
+
+  const reportPath = join(reportsDir, `scan-${stampFrom(now)}.csv`);
+  await writeCsv(reportPath, reportRows, SCAN_COLUMNS);
+  out(`Wrote scan report to ${reportPath}\n`);
+  return 0;
+}
+
 export async function runCli(argv, deps = {}) {
   const {
     out = (text) => process.stdout.write(text),
     err = (text) => process.stderr.write(text),
     loadApiKey = defaultLoadApiKey,
+    loadTheOddsKey = defaultLoadTheOddsKey,
     createClient = createOddsApiClient,
+    createTheOddsClient = createTheOddsApiClient,
     reportsDir = DEFAULT_REPORTS_DIR,
     now = () => new Date(),
   } = deps;
@@ -223,6 +324,14 @@ export async function runCli(argv, deps = {}) {
         return 1;
       }
       return await runCapture(eventId, { loadApiKey, createClient, out, reportsDir, now });
+    }
+    if (command === "scan") {
+      const edgeArg = rest.find((a) => a.startsWith("--edge="));
+      const parsed = edgeArg ? Number(edgeArg.split("=")[1]) / 100 : 0.03;
+      const threshold = Number.isFinite(parsed) ? parsed : 0.03;
+      return await runScan({
+        loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
+      });
     }
     if (command === "evaluate") {
       const csvPath = rest[0];
