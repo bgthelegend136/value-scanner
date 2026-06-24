@@ -8,7 +8,10 @@ export function devig(referenceSelections) {
   const fair = new Map();
   for (const selections of groups.values()) {
     const sumImplied = selections.reduce((sum, s) => sum + 1 / s.decimalOdds, 0);
-    if (sumImplied <= 0) continue;
+    // A complete market with a bookmaker margin always sums to > 1. A sum <= 1
+    // means the market is one-sided/incomplete, so de-vigging it would invent a
+    // bogus ~100% probability — skip it.
+    if (sumImplied <= 1) continue;
     for (const s of selections) {
       fair.set(`${s.market}|${s.line}|${s.outcome}`, 1 / s.decimalOdds / sumImplied);
     }

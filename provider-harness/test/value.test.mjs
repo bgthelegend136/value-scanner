@@ -47,6 +47,23 @@ test("builds data-grounded reasons only", () => {
   assert.match(reasons.join("\n"), /high EV/i);
 });
 
+test("devig skips an incomplete one-sided market", () => {
+  // a book quoting only OVER (no UNDER) must NOT yield a fake 100% fair probability
+  const fair = devig([{ market: "TOTALS", line: "2.5", outcome: "OVER", decimalOdds: 1.9 }]);
+  assert.equal(fair.has("TOTALS|2.5|OVER"), false);
+});
+
+test("consensus ignores a book's incomplete market but keeps complete ones", () => {
+  const ref = [
+    { bookmaker: "pinnacle", market: "TOTALS", line: "2.5", outcome: "OVER", decimalOdds: 1.9 },
+    { bookmaker: "pinnacle", market: "TOTALS", line: "2.5", outcome: "UNDER", decimalOdds: 2.0 },
+    { bookmaker: "softbook", market: "TOTALS", line: "2.5", outcome: "OVER", decimalOdds: 1.85 },
+  ];
+  const consensus = consensusFairProbabilities(ref);
+  // only Pinnacle had both sides, so the OVER consensus is backed by 1 book, not 2
+  assert.equal(consensus.get("TOTALS|2.5|OVER").books, 1);
+});
+
 test("consensus averages per-book de-vig and counts the books", () => {
   const multiBook = [
     { bookmaker: "pinnacle", market: "MATCH_RESULT", line: "", outcome: "1", decimalOdds: 2.0 },
