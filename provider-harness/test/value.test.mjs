@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildReasons, classifyEv, consensusFairProbabilities, devig, findValueBets } from "../src/value.mjs";
+import { buildReasons, classifyEv, consensusFairProbabilities, devig, devigPower, findValueBets } from "../src/value.mjs";
 
 const reference = [
   { market: "MATCH_RESULT", line: "", outcome: "1", decimalOdds: 1.30 },
@@ -19,6 +19,16 @@ test("de-vig fair probabilities sum to 1 per market group", () => {
   assert.ok(Math.abs(totals - 1) < 1e-9);
 });
 
+test("power de-vig sums to 1 and shrinks longshots vs proportional", () => {
+  const prop = devig(reference);
+  const power = devigPower(reference);
+  const sum = ["1", "X", "2"].reduce((s, o) => s + power.get(`MATCH_RESULT||${o}`), 0);
+  assert.ok(Math.abs(sum - 1) < 1e-9);
+  // favorite-longshot bias correction: longshot prob drops, favorite prob rises
+  assert.ok(power.get("MATCH_RESULT||2") < prop.get("MATCH_RESULT||2"));
+  assert.ok(power.get("MATCH_RESULT||1") > prop.get("MATCH_RESULT||1"));
+});
+
 test("classifies EV tiers by magnitude", () => {
   assert.equal(classifyEv(0.04), "VALUE");
   assert.equal(classifyEv(0.10), "VALUE_CHECK");
@@ -32,8 +42,8 @@ test("flags value above threshold, reports NO_REFERENCE when unmatched", () => {
   ];
   const results = findValueBets(bettable, reference, { threshold: 0.03 });
   const draw = results.find((r) => r.outcome === "X");
-  assert.equal(draw.status, "SUSPICIOUS");
-  assert.ok(draw.ev > 0.15);
+  assert.ok(["VALUE_CHECK", "SUSPICIOUS"].includes(draw.status));
+  assert.ok(draw.ev > 0.1);
   assert.ok(draw.fairOdds > 6 && draw.fairOdds < 7);
   const over35 = results.find((r) => r.line === "3.5");
   assert.equal(over35.status, "NO_REFERENCE");

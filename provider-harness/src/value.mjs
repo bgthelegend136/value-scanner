@@ -19,6 +19,41 @@ export function devig(referenceSelections) {
   return fair;
 }
 
+// Solve for the exponent k such that the implied probabilities raised to k sum
+// to 1. Because a complete market sums to > 1 and each implied prob is < 1,
+// raising to k > 1 shrinks the sum; longshots (small probs) shrink fastest,
+// which corrects the favorite-longshot bias of the simple proportional method.
+function solvePowerExponent(impliedProbabilities) {
+  const sumAt = (k) => impliedProbabilities.reduce((sum, p) => sum + p ** k, 0);
+  let low = 1;
+  let high = 100;
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (sumAt(mid) > 1) low = mid;
+    else high = mid;
+  }
+  return (low + high) / 2;
+}
+
+export function devigPower(referenceSelections) {
+  const groups = new Map();
+  for (const selection of referenceSelections) {
+    const groupKey = `${selection.market}|${selection.line}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(selection);
+  }
+  const fair = new Map();
+  for (const selections of groups.values()) {
+    const implied = selections.map((s) => 1 / s.decimalOdds);
+    if (implied.reduce((a, b) => a + b, 0) <= 1) continue;
+    const exponent = solvePowerExponent(implied);
+    selections.forEach((s, index) => {
+      fair.set(`${s.market}|${s.line}|${s.outcome}`, implied[index] ** exponent);
+    });
+  }
+  return fair;
+}
+
 export function consensusFairProbabilities(referenceSelections) {
   const byBook = new Map();
   for (const selection of referenceSelections) {
@@ -48,7 +83,7 @@ export function classifyEv(ev) {
 }
 
 export function findValueBets(bettableSelections, referenceSelections, { threshold = 0.03 } = {}) {
-  const fair = devig(referenceSelections);
+  const fair = devigPower(referenceSelections);
   const results = [];
   for (const selection of bettableSelections) {
     const fairProbability = fair.get(`${selection.market}|${selection.line}|${selection.outcome}`);

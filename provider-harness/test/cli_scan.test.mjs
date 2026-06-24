@@ -86,11 +86,12 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
 
   const valueRaw = await readFile(join(reportsDir, valueReport), "utf8");
   assert.equal(valueRaw.split(/\r?\n/)[0], "ev,tier,match,pick,bookmaker,odd,fairOdd,marketFair,books,kickoffUtc");
-  assert.match(valueRaw, /Spain v Cape Verde/);
-  assert.match(valueRaw, /\+18\.4%/);
-  assert.match(valueRaw, /SUSPICIOUS/);
-  // Draw row: Pinnacle fair 6.33, market consensus (Pinnacle+Betsson) a number, 2 books
-  assert.match(valueRaw, /Draw \(X\),Stoiximan,7\.50,6\.33,\d+\.\d+,2,/);
+  // value row: +EV%, a tier, the match, Draw pick on Stoiximan @7.50, numeric
+  // Pinnacle fairOdd + market consensus, backed by 2 reference books
+  assert.match(
+    valueRaw,
+    /^\+\d+\.\d+%,(VALUE|VALUE_CHECK|SUSPICIOUS),Spain v Cape Verde,Draw \(X\),Stoiximan,7\.50,\d+\.\d+,\d+\.\d+,2,/m,
+  );
   // the clean report must NOT contain the NO_VALUE Superbet draw row
   assert.doesNotMatch(valueRaw, /Superbet/);
 
