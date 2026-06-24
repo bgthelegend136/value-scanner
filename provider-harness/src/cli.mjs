@@ -12,13 +12,15 @@ import { normalizeOddsResponse } from "./normalize.mjs";
 import { createTheOddsApiClient } from "./theodds_client.mjs";
 import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
 import { matchFixtures } from "./match.mjs";
-import { consensusFairProbabilities, findValueBets } from "./value.mjs";
+import { consensusFairProbabilities, devigPower, findValueBets } from "./value.mjs";
 import { formatAlert } from "./alert.mjs";
 import {
   PAPER_COLUMNS,
+  applyClosingLine,
   findStalePending,
   mergePaperBets,
   settlePaperBets,
+  summarizeClv,
   summarizePaperBets,
 } from "./paper.mjs";
 
@@ -436,6 +438,57 @@ async function runSettle({
   return 0;
 }
 
+function closingFairByKey(payload, receivedAt) {
+  const pinnacle = normalizeTheOddsResponse(payload, receivedAt).filter(
+    (row) => row.bookmaker === REFERENCE_BOOKMAKER,
+  );
+  const byEvent = new Map();
+  for (const selection of pinnacle) {
+    if (!byEvent.has(selection.eventId)) byEvent.set(selection.eventId, []);
+    byEvent.get(selection.eventId).push(selection);
+  }
+  const fair = new Map();
+  for (const [eventId, selections] of byEvent) {
+    for (const [key, probability] of devigPower(selections)) {
+      fair.set(`${eventId}|${key}`, probability);
+    }
+  }
+  return fair;
+}
+
+async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, now }) {
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  if (!await defaultFileExists(ledgerPath)) {
+    out("No paper-bet ledger found. Run scan first.\n");
+    return 0;
+  }
+  const rows = await readCsv(ledgerPath);
+  if (!rows.some((row) => row.status === "PENDING")) {
+    out("No pending paper bets for CLV capture.\n");
+    return 0;
+  }
+
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  const response = await client.getOdds({ sportKey: WORLD_CUP_SPORT_KEY });
+  const closing = closingFairByKey(response.data ?? [], response.receivedAt);
+  const updated = applyClosingLine(rows, closing, { capturedAt: now().toISOString() });
+  await writeCsv(ledgerPath, updated, PAPER_COLUMNS);
+
+  const summary = summarizeClv(updated);
+  const beatRate = summary.beatRate === null ? "N/A" : `${(summary.beatRate * 100).toFixed(1)}%`;
+  const averageClv = summary.averageClv === null ? "N/A" : `${signed(summary.averageClv * 100, 1)}%`;
+  out(
+    [
+      `CLV captured: ${summary.captured}`,
+      `Positive CLV (beat the close): ${summary.positive}`,
+      `Beat rate: ${beatRate}`,
+      `Average CLV: ${averageClv}`,
+    ].join("\n") + "\n",
+  );
+  out(`The Odds API quota remaining: ${response.quota?.remaining ?? "?"}\n`);
+  return 0;
+}
+
 export async function runCli(argv, deps = {}) {
   const {
     out = (text) => process.stdout.write(text),
@@ -475,6 +528,11 @@ export async function runCli(argv, deps = {}) {
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
       });
     }
+    if (command === "clv") {
+      return await runClv({
+        loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+      });
+    }
     if (command === "evaluate") {
       const csvPath = rest[0];
       if (!csvPath) {
@@ -485,7 +543,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | evaluate <capture.csv>>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | evaluate <capture.csv>>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

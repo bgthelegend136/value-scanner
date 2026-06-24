@@ -164,6 +164,21 @@ authoritative bookmaker settlement record. The scores feed exposes an aggregate
 soccer score but does not document whether knockout scores include extra time,
 so those cases require caution.
 
+#### Closing Line Value (CLV)
+
+Run near kickoff to measure each pending bet against the sharp closing line:
+
+```text
+node src/cli.mjs clv
+```
+
+It re-fetches Pinnacle's latest de-vigged price and records, per pending bet,
+`closingFairOdds` and `clv` — the EV of your stored odds against the closing
+fair line. Positive CLV means you beat the close, the strongest fast signal that
+the edge was real, available **before** any result. It prints the capture count,
+positive-CLV count, beat rate, and average CLV. Costs ~2 The Odds API credits;
+re-running closer to kickoff overwrites each pending bet with the latest line.
+
 ## Manual worksheet workflow
 
 1. `node src/cli.mjs events` — pick a fixture.
