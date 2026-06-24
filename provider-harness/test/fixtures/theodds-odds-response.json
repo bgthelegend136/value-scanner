@@ -1,0 +1,44 @@
+[
+  {
+    "id": "evt_spain_cv",
+    "sport_key": "soccer_fifa_world_cup",
+    "sport_title": "FIFA World Cup",
+    "commence_time": "2026-06-25T18:00:00Z",
+    "home_team": "Spain",
+    "away_team": "Cape Verde",
+    "bookmakers": [
+      {
+        "key": "pinnacle",
+        "title": "Pinnacle",
+        "last_update": "2026-06-24T12:00:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-06-24T12:00:00Z",
+            "outcomes": [
+              { "name": "Spain", "price": 1.30 },
+              { "name": "Cape Verde", "price": 11.0 },
+              { "name": "Draw", "price": 6.20 }
+            ]
+          },
+          {
+            "key": "totals",
+            "last_update": "2026-06-24T12:00:00Z",
+            "outcomes": [
+              { "name": "Over", "price": 1.90, "point": 2.5 },
+              { "name": "Under", "price": 1.95, "point": 2.5 }
+            ]
+          },
+          {
+            "key": "spreads",
+            "last_update": "2026-06-24T12:00:00Z",
+            "outcomes": [
+              { "name": "Spain", "price": 1.90, "point": -1.5 },
+              { "name": "Cape Verde", "price": 1.95, "point": 1.5 }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
