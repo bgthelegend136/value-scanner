@@ -100,3 +100,19 @@ test("omits league and status when not provided", async () => {
   assert.equal(url.searchParams.has("league"), false);
   assert.equal(url.searchParams.has("status"), false);
 });
+
+test("getOddsMulti requests /odds/multi with comma-joined ids and bookmakers", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(String(url));
+    return jsonResponse([]);
+  };
+  const client = createOddsApiClient({ apiKey: "secret", fetchImpl });
+
+  await client.getOddsMulti({ eventIds: ["1", "2", "3"], bookmakers: ["Superbet", "Stoiximan"] });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/v3/odds/multi");
+  assert.equal(url.searchParams.get("eventIds"), "1,2,3");
+  assert.equal(url.searchParams.get("bookmakers"), "Superbet,Stoiximan");
+});

@@ -47,5 +47,11 @@ export function createOddsApiClient({
         bookmakers: bookmakers.join(","),
       });
     },
+    getOddsMulti({ eventIds, bookmakers }) {
+      return request("odds/multi", {
+        eventIds: eventIds.join(","),
+        bookmakers: bookmakers.join(","),
+      });
+    },
   };
 }

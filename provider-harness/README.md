@@ -123,7 +123,8 @@ EV confidence tiers (default floor 3%, override with `--edge=<percent>`):
 
 Only `1X2` and `Totals` (exact line) are scanned; selections Pinnacle does not
 quote are `NO_REFERENCE` (skipped). Quota: one The Odds API `/odds` batch
-(~2 credits of 500/month) plus one Odds-API.io `/odds` per matched fixture.
+(~2 credits of 500/month) plus one Odds-API.io `/odds/multi` request per 10
+matched fixtures (so a full World Cup matchday is ~3 Odds-API.io requests).
 
 The value model measures EV against Pinnacle's de-vigged line — it does **not**
 assert that the Odds-API.io "Stoiximan"/"Superbet" prices equal the prices on

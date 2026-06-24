@@ -44,7 +44,7 @@ const oddsApiOdds = {
 function fakeOddsApiClient(calls) {
   return {
     async listEvents(args) { calls.push(["oddsapi.events", args]); return { data: [oddsApiEvents[0]], receivedAt: "2026-06-24T12:00:05.000Z", rateLimit: { limit: 100, remaining: 99, resetAt: "x" } }; },
-    async getOdds(args) { calls.push(["oddsapi.odds", args]); return { data: oddsApiOdds, receivedAt: "2026-06-24T12:00:05.000Z", rateLimit: { limit: 100, remaining: 98, resetAt: "x" } }; },
+    async getOddsMulti(args) { calls.push(["oddsapi.multi", args]); return { data: [oddsApiOdds], receivedAt: "2026-06-24T12:00:05.000Z", rateLimit: { limit: 100, remaining: 98, resetAt: "x" } }; },
   };
 }
 function fakeTheOddsClient(calls) {
@@ -74,7 +74,8 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
   assert.match(out, /Match: Spain - Cape Verde/);
   assert.match(out, /Stoiximan/);
   assert.deepEqual(calls.find((c) => c[0] === "oddsapi.events")[1], { sport: "football", league: "international-fifa-world-cup", status: "pending", limit: 100 });
-  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.odds")[1], { eventId: "999", bookmakers: ["Superbet", "Stoiximan"] });
+  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.multi")[1], { eventIds: ["999"], bookmakers: ["Superbet", "Stoiximan"] });
+  assert.equal(calls.filter((c) => c[0] === "oddsapi.multi").length, 1);
   assert.equal(calls.filter((c) => c[0] === "theodds.odds").length, 1);
 
   const files = await readdir(reportsDir);

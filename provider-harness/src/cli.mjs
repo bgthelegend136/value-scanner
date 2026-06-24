@@ -225,6 +225,14 @@ function toFixtureList(events, shape) {
   return events.map(shape).filter((e) => e.homeTeam && e.awayTeam && e.kickoffUtc);
 }
 
+function chunk(items, size) {
+  const groups = [];
+  for (let index = 0; index < items.length; index += size) {
+    groups.push(items.slice(index, index + size));
+  }
+  return groups;
+}
+
 function scanRow(result) {
   return {
     bookmaker: result.bookmaker,
@@ -289,21 +297,36 @@ async function runScan({
   const allReferenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt);
   const referenceSelections = allReferenceSelections.filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
 
+  // Only fixtures we have a Pinnacle reference for are worth pricing.
+  const usablePairs = pairs.filter((pair) =>
+    referenceSelections.some((s) => s.eventId === pair.referenceEventId),
+  );
+
+  // Fetch bettable odds in batches of up to 10 events per request (/odds/multi).
+  const bettableByEvent = new Map();
+  for (const group of chunk(usablePairs, 10)) {
+    const response = await oddsClient.getOddsMulti({
+      eventIds: group.map((pair) => String(pair.bettableEventId)),
+      bookmakers: TARGET_BOOKMAKERS,
+    });
+    for (const event of Array.isArray(response.data) ? response.data : []) {
+      const rows = normalizeOddsResponse(event, response.receivedAt).filter(
+        (row) =>
+          TARGET_BOOKMAKERS.includes(row.bookmaker) &&
+          (row.market === "MATCH_RESULT" || row.market === "TOTALS"),
+      );
+      bettableByEvent.set(String(event.id), rows);
+    }
+  }
+
   const opportunities = [];
   const allRows = [];
-  for (const pair of pairs) {
+  for (const pair of usablePairs) {
     const refForFixture = referenceSelections.filter((s) => s.eventId === pair.referenceEventId);
-    if (refForFixture.length === 0) continue;
     const consensus = consensusFairProbabilities(
       allReferenceSelections.filter((s) => s.eventId === pair.referenceEventId),
     );
-
-    const oddsResponse = await oddsClient.getOdds({
-      eventId: String(pair.bettableEventId),
-      bookmakers: TARGET_BOOKMAKERS,
-    });
-    const bettable = normalizeOddsResponse(oddsResponse.data, oddsResponse.receivedAt)
-      .filter((row) => TARGET_BOOKMAKERS.includes(row.bookmaker) && (row.market === "MATCH_RESULT" || row.market === "TOTALS"));
+    const bettable = bettableByEvent.get(String(pair.bettableEventId)) ?? [];
 
     for (const result of findValueBets(bettable, refForFixture, { threshold })) {
       if (result.status === "NO_REFERENCE") continue;
