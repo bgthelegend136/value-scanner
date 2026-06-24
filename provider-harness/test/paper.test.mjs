@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyClosingLine,
   findStalePending,
   mergePaperBets,
   paperBetKey,
   settlePaperBets,
+  summarizeClv,
   summarizePaperBets,
 } from "../src/paper.mjs";
 
@@ -185,4 +187,37 @@ test("finds pending bets whose kickoff is beyond the scores window", () => {
   const stale = findStalePending(rows, new Date("2026-06-24T12:00:00Z"));
   assert.equal(stale.length, 1);
   assert.equal(stale[0].kickoffUtc, "2026-06-20T12:00:00Z");
+});
+
+test("applies closing-line CLV to pending bets and skips settled ones", () => {
+  const rows = [
+    pending(),
+    pending({ status: "WON", profit: "6.5000" }),
+  ];
+  // closing fair probability 16% for the draw -> fair odds 6.25; bet odds 7.5
+  const closing = new Map([["ref-1|MATCH_RESULT||X", 0.16]]);
+  const updated = applyClosingLine(rows, closing, { capturedAt: "2026-06-25T17:55:00.000Z" });
+  assert.equal(updated[0].closingFairOdds, "6.2500");
+  assert.equal(updated[0].clv, "0.200000"); // 7.5 * 0.16 - 1
+  assert.equal(updated[0].clvCapturedAt, "2026-06-25T17:55:00.000Z");
+  assert.equal(updated[1].clv, ""); // settled row untouched
+});
+
+test("leaves CLV blank when no closing line covers the selection", () => {
+  const updated = applyClosingLine([pending()], new Map(), { capturedAt: "x" });
+  assert.equal(updated[0].clv, "");
+  assert.equal(updated[0].closingFairOdds, "");
+});
+
+test("summarizes CLV beat rate and average", () => {
+  const rows = [
+    pending({ clv: "0.200000" }),
+    pending({ clv: "-0.050000" }),
+    pending({ clv: "" }),
+  ];
+  const summary = summarizeClv(rows);
+  assert.equal(summary.captured, 2);
+  assert.equal(summary.positive, 1);
+  assert.equal(summary.beatRate, 0.5);
+  assert.ok(Math.abs(summary.averageClv - 0.075) < 1e-9);
 });

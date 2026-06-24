@@ -3,6 +3,7 @@ export const PAPER_COLUMNS = [
   "homeTeam", "awayTeam", "bookmaker", "market", "line", "outcome",
   "decimalOdds", "fairOdds", "fairProbability", "ev", "tier", "stake",
   "status", "homeScore", "awayScore", "profit", "settledAt",
+  "closingFairOdds", "clv", "clvCapturedAt",
 ];
 
 const TERMINAL_STATUSES = new Set(["WON", "LOST", "PUSH", "REVIEW"]);
@@ -71,6 +72,9 @@ function paperRow({ result, fixture }, firstSeenAt) {
     awayScore: "",
     profit: "",
     settledAt: "",
+    closingFairOdds: "",
+    clv: "",
+    clvCapturedAt: "",
   };
 }
 
@@ -195,4 +199,44 @@ export function findStalePending(rows, now, { days = 3 } = {}) {
     const kickoff = Date.parse(row.kickoffUtc);
     return Number.isFinite(kickoff) && kickoff < cutoff;
   });
+}
+
+// Closing Line Value: record, for each still-pending bet, the EV of its stored
+// odds measured against the latest (closing) de-vigged fair probability. A
+// positive CLV means the bet beat the closing line — the strongest fast signal
+// that the edge was real, available before any result is known.
+export function applyClosingLine(rows, closingFairByKey, { capturedAt }) {
+  return rows.map((row) => {
+    if (row.status !== "PENDING") return { ...row };
+    const key = `${row.referenceEventId}|${row.market}|${row.line ?? ""}|${row.outcome}`;
+    const fairProbability = closingFairByKey.get(key);
+    if (!(fairProbability > 0)) return { ...row };
+    const odds = finite(row.decimalOdds, "decimalOdds");
+    return {
+      ...row,
+      closingFairOdds: (1 / fairProbability).toFixed(4),
+      clv: (odds * fairProbability - 1).toFixed(6),
+      clvCapturedAt: capturedAt,
+    };
+  });
+}
+
+export function summarizeClv(rows) {
+  let captured = 0;
+  let positive = 0;
+  let total = 0;
+  for (const row of rows) {
+    if (!row.clv) continue;
+    const clv = Number(row.clv);
+    if (!Number.isFinite(clv)) continue;
+    captured += 1;
+    total += clv;
+    if (clv > 0) positive += 1;
+  }
+  return {
+    captured,
+    positive,
+    beatRate: captured > 0 ? positive / captured : null,
+    averageClv: captured > 0 ? total / captured : null,
+  };
 }
