@@ -7,6 +7,8 @@ const ALIASES = new Map([
   ["united states of america", "usa"],
   ["turkiye", "turkey"],
   ["cote d ivoire", "ivory coast"],
+  ["congo dr", "dr congo"],
+  ["democratic republic of congo", "dr congo"],
   ["czech republic", "czechia"],
   ["china pr", "china"],
   ["ir iran", "iran"],

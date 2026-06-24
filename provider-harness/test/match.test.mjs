@@ -8,6 +8,7 @@ test("normalizes accents, punctuation, and national-team aliases", () => {
   assert.equal(normalizeTeamName("Bosnia & Herzegovina"), normalizeTeamName("Bosnia and Herzegovina"));
   assert.equal(normalizeTeamName("Côte d'Ivoire"), normalizeTeamName("Ivory Coast"));
   assert.equal(normalizeTeamName("Türkiye"), normalizeTeamName("Turkey"));
+  assert.equal(normalizeTeamName("Congo DR"), normalizeTeamName("DR Congo"));
 });
 
 test("matches same fixture across providers and rejects mismatches", () => {
