@@ -19,6 +19,7 @@ const execFileAsync = promisify(execFile);
 
 const TARGET_BOOKMAKERS = ["Superbet", "Stoiximan"];
 const WORLD_CUP_SPORT_KEY = "soccer_fifa_world_cup";
+const WORLD_CUP_LEAGUE_SLUG = "international-fifa-world-cup";
 const REFERENCE_BOOKMAKER = "pinnacle";
 const SCAN_COLUMNS = [
   "bookmaker", "eventId", "kickoffUtc", "homeTeam", "awayTeam",
@@ -251,15 +252,16 @@ async function runScan({
     eventId: String(e.id), homeTeam: e.home_team, awayTeam: e.away_team, kickoffUtc: e.commence_time,
   }));
 
-  const oddsEventsRaw = await oddsClient.listEvents({ sport: "football", limit: 50 });
+  const oddsEventsRaw = await oddsClient.listEvents({
+    sport: "football",
+    league: WORLD_CUP_LEAGUE_SLUG,
+    status: "pending",
+    limit: 100,
+  });
   const oddsEvents = Array.isArray(oddsEventsRaw.data) ? oddsEventsRaw.data : oddsEventsRaw.data?.events ?? [];
-  const worldCupOddsEvents = oddsEvents.filter((e) =>
-    /world\s*cup|mundial/iu.test(String(e.league?.name ?? e.league ?? "")),
-  );
-  const bettableFixtures = toFixtureList(
-    worldCupOddsEvents.length > 0 ? worldCupOddsEvents : oddsEvents,
-    (e) => ({ eventId: String(e.id), homeTeam: e.home, awayTeam: e.away, kickoffUtc: e.date }),
-  );
+  const bettableFixtures = toFixtureList(oddsEvents, (e) => ({
+    eventId: String(e.id), homeTeam: e.home, awayTeam: e.away, kickoffUtc: e.date,
+  }));
 
   const pairs = matchFixtures(referenceFixtures, bettableFixtures);
 

@@ -68,6 +68,7 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
   assert.match(out, /ALERT:/);
   assert.match(out, /Match: Spain - Cape Verde/);
   assert.match(out, /Stoiximan/);
+  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.events")[1], { sport: "football", league: "international-fifa-world-cup", status: "pending", limit: 100 });
   assert.deepEqual(calls.find((c) => c[0] === "oddsapi.odds")[1], { eventId: "999", bookmakers: ["Superbet", "Stoiximan"] });
   assert.equal(calls.filter((c) => c[0] === "theodds.odds").length, 1);
 

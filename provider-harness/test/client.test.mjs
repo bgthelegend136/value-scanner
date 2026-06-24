@@ -64,3 +64,39 @@ test("redacts the key from provider failures", async () => {
     },
   );
 });
+
+test("passes league and status filters when provided", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(String(url));
+    return jsonResponse([]);
+  };
+  const client = createOddsApiClient({ apiKey: "secret", fetchImpl });
+
+  await client.listEvents({
+    sport: "football",
+    league: "international-fifa-world-cup",
+    status: "pending",
+    limit: 100,
+  });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.searchParams.get("league"), "international-fifa-world-cup");
+  assert.equal(url.searchParams.get("status"), "pending");
+  assert.equal(url.searchParams.get("limit"), "100");
+});
+
+test("omits league and status when not provided", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(String(url));
+    return jsonResponse([]);
+  };
+  const client = createOddsApiClient({ apiKey: "secret", fetchImpl });
+
+  await client.listEvents({ sport: "football", limit: 5 });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.searchParams.has("league"), false);
+  assert.equal(url.searchParams.has("status"), false);
+});

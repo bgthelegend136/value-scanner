@@ -35,8 +35,11 @@ export function createOddsApiClient({
   }
 
   return {
-    listEvents({ sport = "football", limit = 5 } = {}) {
-      return request("events", { sport, limit });
+    listEvents({ sport = "football", limit = 5, league, status } = {}) {
+      const parameters = { sport, limit };
+      if (league) parameters.league = league;
+      if (status) parameters.status = status;
+      return request("events", parameters);
     },
     getOdds({ eventId, bookmakers }) {
       return request("odds", {
