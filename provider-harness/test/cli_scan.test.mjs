@@ -22,6 +22,11 @@ const theOddsOdds = [
           { name: "Spain", price: 1.30 }, { name: "Cape Verde", price: 11.0 }, { name: "Draw", price: 6.20 },
         ] },
       ] },
+      { key: "betsson", title: "Betsson", last_update: "2026-06-24T12:00:00Z", markets: [
+        { key: "h2h", last_update: "2026-06-24T12:00:00Z", outcomes: [
+          { name: "Spain", price: 1.32 }, { name: "Cape Verde", price: 10.5 }, { name: "Draw", price: 6.00 },
+        ] },
+      ] },
     ],
   },
 ];
@@ -79,11 +84,12 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
   assert.ok(fullReport, "full audit report written");
 
   const valueRaw = await readFile(join(reportsDir, valueReport), "utf8");
-  assert.equal(valueRaw.split(/\r?\n/)[0], "ev,tier,match,pick,bookmaker,odd,fairOdd,kickoffUtc");
+  assert.equal(valueRaw.split(/\r?\n/)[0], "ev,tier,match,pick,bookmaker,odd,fairOdd,marketFair,books,kickoffUtc");
   assert.match(valueRaw, /Spain v Cape Verde/);
-  assert.match(valueRaw, /Draw \(X\)/);
   assert.match(valueRaw, /\+18\.4%/);
   assert.match(valueRaw, /SUSPICIOUS/);
+  // Draw row: Pinnacle fair 6.33, market consensus (Pinnacle+Betsson) a number, 2 books
+  assert.match(valueRaw, /Draw \(X\),Stoiximan,7\.50,6\.33,\d+\.\d+,2,/);
   // the clean report must NOT contain the NO_VALUE Superbet draw row
   assert.doesNotMatch(valueRaw, /Superbet/);
 

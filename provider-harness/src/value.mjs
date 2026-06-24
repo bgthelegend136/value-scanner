@@ -16,6 +16,28 @@ export function devig(referenceSelections) {
   return fair;
 }
 
+export function consensusFairProbabilities(referenceSelections) {
+  const byBook = new Map();
+  for (const selection of referenceSelections) {
+    if (!byBook.has(selection.bookmaker)) byBook.set(selection.bookmaker, []);
+    byBook.get(selection.bookmaker).push(selection);
+  }
+  const totals = new Map();
+  for (const bookSelections of byBook.values()) {
+    for (const [key, probability] of devig(bookSelections)) {
+      const entry = totals.get(key) ?? { sum: 0, books: 0 };
+      entry.sum += probability;
+      entry.books += 1;
+      totals.set(key, entry);
+    }
+  }
+  const consensus = new Map();
+  for (const [key, { sum, books }] of totals) {
+    consensus.set(key, { fairProbability: sum / books, books });
+  }
+  return consensus;
+}
+
 export function classifyEv(ev) {
   if (ev >= 0.15) return "SUSPICIOUS";
   if (ev >= 0.05) return "VALUE_CHECK";

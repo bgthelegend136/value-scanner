@@ -12,7 +12,7 @@ import { normalizeOddsResponse } from "./normalize.mjs";
 import { createTheOddsApiClient } from "./theodds_client.mjs";
 import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
 import { matchFixtures } from "./match.mjs";
-import { findValueBets } from "./value.mjs";
+import { consensusFairProbabilities, findValueBets } from "./value.mjs";
 import { formatAlert } from "./alert.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -26,7 +26,7 @@ const SCAN_COLUMNS = [
   "market", "line", "outcome", "decimalOdds", "fairOdds", "fairProbability",
   "ev", "status",
 ];
-const OPPORTUNITY_COLUMNS = ["ev", "tier", "match", "pick", "bookmaker", "odd", "fairOdd", "kickoffUtc"];
+const OPPORTUNITY_COLUMNS = ["ev", "tier", "match", "pick", "bookmaker", "odd", "fairOdd", "marketFair", "books", "kickoffUtc"];
 const MATCH_RESULT_PICK = { "1": "Home (1)", X: "Draw (X)", "2": "Away (2)" };
 
 const CANONICAL_COLUMNS = [
@@ -243,9 +243,10 @@ function scanRow(result) {
   };
 }
 
-function opportunityRow(result, fixture) {
+function opportunityRow(result, fixture, consensus) {
   const pick =
     result.market === "MATCH_RESULT" ? MATCH_RESULT_PICK[result.outcome] : `${result.outcome} ${result.line}`;
+  const market = consensus.get(`${result.market}|${result.line}|${result.outcome}`);
   return {
     ev: `+${(result.ev * 100).toFixed(1)}%`,
     tier: result.status,
@@ -254,6 +255,8 @@ function opportunityRow(result, fixture) {
     bookmaker: result.bookmaker,
     odd: result.decimalOdds.toFixed(2),
     fairOdd: result.fairOdds.toFixed(2),
+    marketFair: market ? (1 / market.fairProbability).toFixed(2) : "",
+    books: market ? String(market.books) : "",
     kickoffUtc: fixture.kickoffUtc,
   };
 }
@@ -283,14 +286,17 @@ async function runScan({
   const pairs = matchFixtures(referenceFixtures, bettableFixtures);
 
   const referenceOdds = await theOddsClient.getOdds({ sportKey: WORLD_CUP_SPORT_KEY });
-  const referenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt)
-    .filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
+  const allReferenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt);
+  const referenceSelections = allReferenceSelections.filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
 
   const opportunities = [];
   const allRows = [];
   for (const pair of pairs) {
     const refForFixture = referenceSelections.filter((s) => s.eventId === pair.referenceEventId);
     if (refForFixture.length === 0) continue;
+    const consensus = consensusFairProbabilities(
+      allReferenceSelections.filter((s) => s.eventId === pair.referenceEventId),
+    );
 
     const oddsResponse = await oddsClient.getOdds({
       eventId: String(pair.bettableEventId),
@@ -302,7 +308,7 @@ async function runScan({
     for (const result of findValueBets(bettable, refForFixture, { threshold })) {
       if (result.status === "NO_REFERENCE") continue;
       allRows.push(scanRow(result));
-      if (result.status !== "NO_VALUE") opportunities.push({ result, fixture: pair });
+      if (result.status !== "NO_VALUE") opportunities.push({ result, fixture: pair, consensus });
     }
   }
 
@@ -315,7 +321,7 @@ async function runScan({
 
   const stamp = stampFrom(now);
   const reportPath = join(reportsDir, `scan-${stamp}.csv`);
-  await writeCsv(reportPath, opportunities.map(({ result, fixture }) => opportunityRow(result, fixture)), OPPORTUNITY_COLUMNS);
+  await writeCsv(reportPath, opportunities.map(({ result, fixture, consensus }) => opportunityRow(result, fixture, consensus)), OPPORTUNITY_COLUMNS);
   const allPath = join(reportsDir, `scan-all-${stamp}.csv`);
   await writeCsv(allPath, allRows, SCAN_COLUMNS);
   out(`Wrote ${opportunities.length} value bets to ${reportPath}\n`);

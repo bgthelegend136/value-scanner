@@ -107,8 +107,12 @@ fixtures by kickoff + team name (national-team aliases handled); de-vig
 Pinnacle's `1X2`/`Totals` prices to fair probabilities; compute each bettable
 selection's `EV = offeredOdds × fairProbability − 1`; print alerts and write two
 sanitized CSVs to `reports/`: `scan-<ts>.csv` (the value bets only, ranked by EV,
-with columns `ev, tier, match, pick, bookmaker, odd, fairOdd, kickoffUtc`) and
-`scan-all-<ts>.csv` (every evaluated selection, for audit).
+with columns `ev, tier, match, pick, bookmaker, odd, fairOdd, marketFair, books,
+kickoffUtc`) and `scan-all-<ts>.csv` (every evaluated selection, for audit).
+
+`fairOdd` is Pinnacle's de-vigged price (the EV anchor). `marketFair` is the
+de-vigged **consensus** across all `eu` reference books, and `books` is how many
+backed it — context to see whether Pinnacle is corroborated by the wider market.
 
 EV confidence tiers (default floor 3%, override with `--edge=<percent>`):
 
