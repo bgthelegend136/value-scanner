@@ -135,6 +135,35 @@ stoiximan.gr / superbet.gr (regional identity remains `UNVERIFIED`). No
 scraping, no automation, no auto-betting; every alert carries a
 verify-before-betting risk block.
 
+### Paper ROI tracking
+
+Every `scan` automatically records each unique value alert in
+`reports/paper-bets.csv` as a paper bet with a fixed stake of **1 unit**.
+Identity is `The Odds API event + bookmaker + market + exact line + outcome`,
+so repeated scans do not duplicate or reprice the same bet. The first observed
+odds, EV, tier, and timestamp are retained.
+
+Settle completed bets with:
+
+```text
+node src/cli.mjs settle
+```
+
+`settle` requests World Cup scores for the previous three days, updates
+`PENDING` bets to `WON`, `LOST`, `PUSH`, or `REVIEW`, and prints settled stake,
+net paper profit, and realized ROI:
+
+`ROI = settled paper profit / settled paper stake`
+
+A win returns `odds - 1` units, a loss `-1`, and a push `0`. Pending and review
+rows are excluded from ROI. The scores request costs 2 The Odds API credits
+when `daysFrom=3`; unresolved bets older than three days require manual review.
+
+This is paper-performance measurement, not proof of future profitability or an
+authoritative bookmaker settlement record. The scores feed exposes an aggregate
+soccer score but does not document whether knockout scores include extra time,
+so those cases require caution.
+
 ## Manual worksheet workflow
 
 1. `node src/cli.mjs events` — pick a fixture.
