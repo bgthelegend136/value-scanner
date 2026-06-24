@@ -1,5 +1,8 @@
 # Odds-API.io Regional Validation Harness
 
+> 🇬🇷 **Χρήστες:** για οδηγό χρήσης στα ελληνικά (τι κάνει, πώς τρέχει, πώς
+> διαβάζεις τα αποτελέσματα), δες το [`USER-GUIDE.md`](USER-GUIDE.md).
+
 A small, dependency-free Node.js 22 harness that helps determine whether
 Odds-API.io prices for **Superbet** and **Stoiximan** correspond to the prices
 shown on their Greece-facing websites.
