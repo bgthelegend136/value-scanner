@@ -91,6 +91,40 @@ bookmaker + market stratum**. For every completed row it:
 
 A per-stratum summary CSV is written to `reports/`.
 
+### `scan`
+
+```
+node src/cli.mjs scan [--edge=5]
+```
+
+Finds **positive-EV value bets** on upcoming FIFA World Cup matches by comparing
+the bettable Greek-market books (**Stoiximan**, **Superbet** via Odds-API.io)
+against **Pinnacle's de-vigged fair price** (via The Odds API). Requires both
+keys in `.env.local`: `ODDS_API_IO_KEY` and `THE_ODDS_API_KEY`.
+
+Flow: discover World Cup fixtures from The Odds API; match them to Odds-API.io
+fixtures by kickoff + team name (national-team aliases handled); de-vig
+Pinnacle's `1X2`/`Totals` prices to fair probabilities; compute each bettable
+selection's `EV = offeredOdds × fairProbability − 1`; print alerts and write a
+sanitized report to `reports/`.
+
+EV confidence tiers (default floor 3%, override with `--edge=<percent>`):
+
+- `VALUE` — **3%–5%**, the prime, most trustworthy band against a sharp anchor.
+- `VALUE_CHECK` — **5%–15%**, flagged but verify line/timing first.
+- `SUSPICIOUS` — **> ~15%**, almost always a stale/mismatched line or palpable
+  error, **not** a stronger bet — surfaced with an explicit warning.
+
+Only `1X2` and `Totals` (exact line) are scanned; selections Pinnacle does not
+quote are `NO_REFERENCE` (skipped). Quota: one The Odds API `/odds` batch
+(~2 credits of 500/month) plus one Odds-API.io `/odds` per matched fixture.
+
+The value model measures EV against Pinnacle's de-vigged line — it does **not**
+assert that the Odds-API.io "Stoiximan"/"Superbet" prices equal the prices on
+stoiximan.gr / superbet.gr (regional identity remains `UNVERIFIED`). No
+scraping, no automation, no auto-betting; every alert carries a
+verify-before-betting risk block.
+
 ## Manual worksheet workflow
 
 1. `node src/cli.mjs events` — pick a fixture.
