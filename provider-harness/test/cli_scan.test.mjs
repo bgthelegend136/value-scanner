@@ -73,9 +73,24 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
   assert.equal(calls.filter((c) => c[0] === "theodds.odds").length, 1);
 
   const files = await readdir(reportsDir);
-  const report = files.find((f) => f.startsWith("scan-") && f.endsWith(".csv"));
-  assert.ok(report);
-  const raw = await readFile(join(reportsDir, report), "utf8");
-  assert.doesNotMatch(raw, new RegExp(ODDS_KEY));
-  assert.doesNotMatch(raw, new RegExp(THEODDS_KEY));
+  const valueReport = files.find((f) => f.startsWith("scan-") && !f.startsWith("scan-all-") && f.endsWith(".csv"));
+  const fullReport = files.find((f) => f.startsWith("scan-all-") && f.endsWith(".csv"));
+  assert.ok(valueReport, "clean value report written");
+  assert.ok(fullReport, "full audit report written");
+
+  const valueRaw = await readFile(join(reportsDir, valueReport), "utf8");
+  assert.equal(valueRaw.split(/\r?\n/)[0], "ev,tier,match,pick,bookmaker,odd,fairOdd,kickoffUtc");
+  assert.match(valueRaw, /Spain v Cape Verde/);
+  assert.match(valueRaw, /Draw \(X\)/);
+  assert.match(valueRaw, /\+18\.4%/);
+  assert.match(valueRaw, /SUSPICIOUS/);
+  // the clean report must NOT contain the NO_VALUE Superbet draw row
+  assert.doesNotMatch(valueRaw, /Superbet/);
+
+  const fullRaw = await readFile(join(reportsDir, fullReport), "utf8");
+  assert.match(fullRaw, /NO_VALUE/);
+  for (const raw of [valueRaw, fullRaw]) {
+    assert.doesNotMatch(raw, new RegExp(ODDS_KEY));
+    assert.doesNotMatch(raw, new RegExp(THEODDS_KEY));
+  }
 });

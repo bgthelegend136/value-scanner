@@ -26,6 +26,8 @@ const SCAN_COLUMNS = [
   "market", "line", "outcome", "decimalOdds", "fairOdds", "fairProbability",
   "ev", "status",
 ];
+const OPPORTUNITY_COLUMNS = ["ev", "tier", "match", "pick", "bookmaker", "odd", "fairOdd", "kickoffUtc"];
+const MATCH_RESULT_PICK = { "1": "Home (1)", X: "Draw (X)", "2": "Away (2)" };
 
 const CANONICAL_COLUMNS = [
   "provider",
@@ -241,6 +243,21 @@ function scanRow(result) {
   };
 }
 
+function opportunityRow(result, fixture) {
+  const pick =
+    result.market === "MATCH_RESULT" ? MATCH_RESULT_PICK[result.outcome] : `${result.outcome} ${result.line}`;
+  return {
+    ev: `+${(result.ev * 100).toFixed(1)}%`,
+    tier: result.status,
+    match: `${fixture.homeTeam} v ${fixture.awayTeam}`,
+    pick,
+    bookmaker: result.bookmaker,
+    odd: result.decimalOdds.toFixed(2),
+    fairOdd: result.fairOdds.toFixed(2),
+    kickoffUtc: fixture.kickoffUtc,
+  };
+}
+
 async function runScan({
   loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
 }) {
@@ -269,8 +286,8 @@ async function runScan({
   const referenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt)
     .filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
 
-  const alerts = [];
-  const reportRows = [];
+  const opportunities = [];
+  const allRows = [];
   for (const pair of pairs) {
     const refForFixture = referenceSelections.filter((s) => s.eventId === pair.referenceEventId);
     if (refForFixture.length === 0) continue;
@@ -284,20 +301,25 @@ async function runScan({
 
     for (const result of findValueBets(bettable, refForFixture, { threshold })) {
       if (result.status === "NO_REFERENCE") continue;
-      if (result.status === "NO_VALUE") { reportRows.push(scanRow(result)); continue; }
-      reportRows.push(scanRow(result));
-      alerts.push(formatAlert(result, { fixture: pair }));
+      allRows.push(scanRow(result));
+      if (result.status !== "NO_VALUE") opportunities.push({ result, fixture: pair });
     }
   }
 
-  const header = `World Cup value scan — ${pairs.length} matched fixtures, ${alerts.length} alerts (EV >= ${(threshold * 100).toFixed(1)}%).`;
+  opportunities.sort((a, b) => b.result.ev - a.result.ev);
+
+  const header = `World Cup value scan — ${pairs.length} matched fixtures, ${opportunities.length} value bets (EV >= ${(threshold * 100).toFixed(1)}%).`;
   out(`${header}\n\n`);
-  for (const alert of alerts) out(`${alert}\n\n`);
+  for (const { result, fixture } of opportunities) out(`${formatAlert(result, { fixture })}\n\n`);
   out(`The Odds API quota remaining: ${referenceOdds.quota?.remaining ?? "?"}\n`);
 
-  const reportPath = join(reportsDir, `scan-${stampFrom(now)}.csv`);
-  await writeCsv(reportPath, reportRows, SCAN_COLUMNS);
-  out(`Wrote scan report to ${reportPath}\n`);
+  const stamp = stampFrom(now);
+  const reportPath = join(reportsDir, `scan-${stamp}.csv`);
+  await writeCsv(reportPath, opportunities.map(({ result, fixture }) => opportunityRow(result, fixture)), OPPORTUNITY_COLUMNS);
+  const allPath = join(reportsDir, `scan-all-${stamp}.csv`);
+  await writeCsv(allPath, allRows, SCAN_COLUMNS);
+  out(`Wrote ${opportunities.length} value bets to ${reportPath}\n`);
+  out(`Full audit data (${allRows.length} rows) at ${allPath}\n`);
   return 0;
 }
 
