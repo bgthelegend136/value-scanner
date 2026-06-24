@@ -14,7 +14,13 @@ import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
 import { matchFixtures } from "./match.mjs";
 import { consensusFairProbabilities, findValueBets } from "./value.mjs";
 import { formatAlert } from "./alert.mjs";
-import { PAPER_COLUMNS, mergePaperBets } from "./paper.mjs";
+import {
+  PAPER_COLUMNS,
+  findStalePending,
+  mergePaperBets,
+  settlePaperBets,
+  summarizePaperBets,
+} from "./paper.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -366,6 +372,70 @@ async function runScan({
   return 0;
 }
 
+function signed(value, digits = 4) {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+function printPaperSummary(out, rows) {
+  const summary = summarizePaperBets(rows);
+  const roi = summary.roi === null ? "N/A" : `${signed(summary.roi * 100, 1)}%`;
+  out(
+    [
+      `Paper bets: ${summary.total}`,
+      `Pending: ${summary.pending}`,
+      `Settled: ${summary.settled}`,
+      `Wins: ${summary.wins}`,
+      `Losses: ${summary.losses}`,
+      `Pushes: ${summary.pushes}`,
+      `Review: ${summary.review}`,
+      `Settled stake: ${summary.settledStake.toFixed(2)} units`,
+      `Net profit: ${signed(summary.profit)} units`,
+      `ROI: ${roi}`,
+      "Settlement limitation: soccer ROI uses The Odds API aggregate score; extra-time period semantics are not documented.",
+    ].join("\n") + "\n",
+  );
+}
+
+async function runSettle({
+  loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+}) {
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  if (!await defaultFileExists(ledgerPath)) {
+    out("No paper-bet ledger found. Run scan first.\n");
+    return 0;
+  }
+
+  const rows = await readCsv(ledgerPath);
+  if (rows.length === 0) {
+    out("Paper-bet ledger is empty. Run scan first.\n");
+    return 0;
+  }
+  if (!rows.some((row) => row.status === "PENDING")) {
+    out("No pending paper bets to settle.\n");
+    printPaperSummary(out, rows);
+    return 0;
+  }
+
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  const response = await client.getScores({
+    sportKey: WORLD_CUP_SPORT_KEY,
+    daysFrom: 3,
+  });
+  const settled = settlePaperBets(rows, response.data ?? []);
+  await writeCsv(ledgerPath, settled, PAPER_COLUMNS);
+  printPaperSummary(out, settled);
+
+  const stale = findStalePending(settled, now());
+  if (stale.length > 0) {
+    out(
+      `Warning: ${stale.length} pending paper bet${stale.length === 1 ? "" : "s"} ` +
+      "is older than 3 days and may be outside the free scores window.\n",
+    );
+  }
+  out(`The Odds API quota remaining: ${response.quota?.remaining ?? "?"}\n`);
+  return 0;
+}
+
 export async function runCli(argv, deps = {}) {
   const {
     out = (text) => process.stdout.write(text),
@@ -400,6 +470,11 @@ export async function runCli(argv, deps = {}) {
         loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
       });
     }
+    if (command === "settle") {
+      return await runSettle({
+        loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+      });
+    }
     if (command === "evaluate") {
       const csvPath = rest[0];
       if (!csvPath) {
@@ -410,7 +485,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | evaluate <capture.csv>>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | evaluate <capture.csv>>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;
