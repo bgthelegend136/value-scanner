@@ -114,10 +114,20 @@ For a matched fixture and a market both Pinnacle and a bettable book quote:
 2. **Fair odds** = `1 / fair_p_i`.
 3. For each bettable selection matching `(market, exact line, outcome)`:
    `EV = bookOdds * fair_p - 1`.
-4. Classify **VALUE** when `EV >= threshold` (default **+0.03**, `--edge`
-   configurable). Report `EV%` and the fair vs offered price.
+4. Flag when `EV >= threshold` (default **+0.03**, `--edge` configurable), then
+   label by confidence tier rather than a single verdict:
+   - **3%–5%** → `VALUE` (prime, most trustworthy band against a sharp anchor).
+   - **5%–15%** → `VALUE_CHECK` (flagged, but verify line/timing first).
+   - **> ~15%** → `SUSPICIOUS` — almost always a stale/mismatched line or a
+     palpable error, **not** a stronger bet. Surfaced but explicitly warned.
+   Report `EV%` and the fair vs offered price for each.
 5. Pinnacle must quote that exact selection/line; otherwise `NO_REFERENCE`
    (skipped, not a failure). Totals compare **exact line only** (`2.5` ≠ `2.25`).
+
+Rationale: against a sharp de-vigged anchor, genuine repeatable edge lives in the
+low single digits; very high measured EV signals a data artifact (stale soft-book
+price, cross-provider timing skew, wrong line match, voidable error), so the
+scanner treats high EV as suspect, not superior.
 
 ## Reasons (data-grounded only)
 
