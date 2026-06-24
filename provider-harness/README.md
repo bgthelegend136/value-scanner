@@ -1,0 +1,125 @@
+# Odds-API.io Regional Validation Harness
+
+A small, dependency-free Node.js 22 harness that helps determine whether
+Odds-API.io prices for **Superbet** and **Stoiximan** correspond to the prices
+shown on their Greece-facing websites.
+
+It does this without scraping, automating, logging into, or betting on any
+bookmaker site. The provider feed is fetched over the documented HTTP API; the
+bookmaker-site prices are entered **by a human** into a generated worksheet, and
+the harness only compares the two.
+
+## What it is not
+
+- It does **not** scrape or automate bookmaker websites.
+- It does **not** place bets or generate actionable alerts.
+- It does **not** prove regional identity. A bookmaker name alone is not proof
+  that a feed is the Greece-facing product. Every captured selection is recorded
+  with `regionalStatus = UNVERIFIED` until the provider supplies an explicit feed
+  identifier or written human confirmation.
+
+## Requirements
+
+- Node.js **22+** (uses the built-in `fetch`, `node:test`, and ES modules).
+- No runtime dependencies.
+- An Odds-API.io key in a git-ignored `.env.local` at the repository root:
+
+  ```
+  ODDS_API_IO_KEY=your-key-here
+  ```
+
+The key is read only from `.env.local`. It is never printed, persisted, or
+included in error messages or request URLs.
+
+## Commands
+
+Run from the `provider-harness/` directory.
+
+### `events`
+
+```
+node src/cli.mjs events
+```
+
+Fetches up to 5 upcoming football events
+(`GET /v3/events?sport=football&limit=5`) and prints a bounded, readable list
+plus the current rate-limit metadata (`remaining`, `limit`, `reset`). No raw
+JSON and no key are printed.
+
+### `capture <eventId>`
+
+```
+node src/cli.mjs capture 123456
+```
+
+Fetches odds for exactly **Superbet** and **Stoiximan**
+(`GET /v3/odds?eventId=...&bookmakers=Superbet,Stoiximan`), normalizes the
+documented pre-match full-time markets into canonical selections, and writes a
+sanitized CSV to `reports/`. The raw API response is not retained.
+
+Normalized markets:
+
+- Match result (`1`, `X`, `2`)
+- Main totals (`OVER` / `UNDER`, exact line preserved)
+- Both teams to score (`YES` / `NO`)
+- Double Chance (`1X`, `12`, `X2`) — Stoiximan only
+
+Superbet does not offer Double Chance, so it is never invented; downstream it is
+reported as `NOT_APPLICABLE`, not as a failure.
+
+Each row carries blank `siteOdds`, `siteObservedAt`, and `notes` columns for
+**manual** entry of the Greek-site price and the moment it was observed.
+
+### `evaluate <capture.csv>`
+
+```
+node src/cli.mjs evaluate reports/capture-123456-....csv
+```
+
+Reads a completed worksheet and reports metrics **independently for each
+bookmaker + market stratum**. For every completed row it:
+
+- rejects identity mismatches (bookmaker, event, kickoff, period, market, exact
+  line, outcome must all match — `2.5` never matches `2.25`/`2.75`, and
+  full-time never mixes with half-time/alternate periods);
+- rejects observations whose site/API timestamps are more than **10 seconds**
+  apart;
+- classifies the price difference as `EXACT` (≤ 0.01), `ACCEPTABLE`
+  (≤ 0.02 or implied-probability difference ≤ 0.5pp), or `LARGE_MISMATCH`
+  (> 0.05);
+- treats Superbet Double Chance as `NOT_APPLICABLE`.
+
+A per-stratum summary CSV is written to `reports/`.
+
+## Manual worksheet workflow
+
+1. `node src/cli.mjs events` — pick a fixture.
+2. `node src/cli.mjs capture <eventId>` — generate the worksheet.
+3. Open the bookmaker's Greece-facing site by hand, read each price, and fill in
+   `siteOdds` and `siteObservedAt` (ISO 8601, within 10 seconds of the API
+   receipt) for the selections you can match.
+4. `node src/cli.mjs evaluate <worksheet.csv>` — read the stratified report.
+
+The first run is an exploratory pilot (3–5 fixtures, one near-simultaneous
+observation each). Pilot results are descriptive only; production pass criteria
+require a much larger sample (see the design doc).
+
+## Tests
+
+```
+npm test
+```
+
+Node's built-in test runner covers environment loading and key redaction,
+normalization, identity and comparison metrics, CSV round-tripping, fixture-based
+client requests, and the CLI commands. There are no live calls in the test
+suite; live use is opt-in and quota-safe.
+
+## Safety summary
+
+- Key read only from `.env.local`; never printed, persisted, or placed in errors
+  or URLs.
+- No bookmaker-site scraping, automation, login, betting, or alerts.
+- Raw API responses are not retained — only sanitized selections, timestamps,
+  and comparison records.
+- Regional identity remains `UNVERIFIED` pending explicit provider confirmation.

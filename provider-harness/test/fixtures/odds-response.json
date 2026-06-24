@@ -1,0 +1,48 @@
+{
+  "id": 123456,
+  "home": "Greece",
+  "away": "Italy",
+  "date": "2026-06-25T18:00:00Z",
+  "league": { "name": "International" },
+  "bookmakers": {
+    "Stoiximan": [
+      {
+        "name": "ML",
+        "odds": [{ "home": "2.10", "draw": "3.25", "away": "3.40" }],
+        "updatedAt": "2026-06-24T12:00:00Z"
+      },
+      {
+        "name": "Totals",
+        "odds": [{ "hdp": "2.5", "over": "1.90", "under": "1.95" }],
+        "updatedAt": "2026-06-24T12:00:01Z"
+      },
+      {
+        "name": "Both Teams To Score",
+        "odds": [{ "yes": "1.80", "no": "2.00" }],
+        "updatedAt": "2026-06-24T12:00:02Z"
+      },
+      {
+        "name": "Double Chance",
+        "odds": [{ "homeDraw": "1.30", "homeAway": "1.35", "drawAway": "1.65" }],
+        "updatedAt": "2026-06-24T12:00:03Z"
+      },
+      {
+        "name": "Totals HT",
+        "odds": [{ "hdp": "1.5", "over": "2.20", "under": "1.65" }],
+        "updatedAt": "2026-06-24T12:00:04Z"
+      }
+    ],
+    "Superbet": [
+      {
+        "name": "ML",
+        "odds": [{ "home": "2.12", "draw": "3.20", "away": "3.35" }],
+        "updatedAt": "2026-06-24T12:00:00Z"
+      },
+      {
+        "name": "Totals",
+        "odds": [{ "line": 2.5, "over": 1.92, "under": 1.93 }],
+        "updatedAt": "2026-06-24T12:00:01Z"
+      }
+    ]
+  }
+}
