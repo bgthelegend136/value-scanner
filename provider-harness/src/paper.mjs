@@ -1,0 +1,198 @@
+export const PAPER_COLUMNS = [
+  "referenceEventId", "bettableEventId", "firstSeenAt", "kickoffUtc",
+  "homeTeam", "awayTeam", "bookmaker", "market", "line", "outcome",
+  "decimalOdds", "fairOdds", "fairProbability", "ev", "tier", "stake",
+  "status", "homeScore", "awayScore", "profit", "settledAt",
+];
+
+const TERMINAL_STATUSES = new Set(["WON", "LOST", "PUSH", "REVIEW"]);
+const SETTLED_STATUSES = new Set(["WON", "LOST", "PUSH"]);
+const VALID_STATUSES = new Set(["PENDING", ...TERMINAL_STATUSES]);
+
+function finite(value, name) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid paper bet ${name}: ${value}`);
+  return parsed;
+}
+
+function required(value, name) {
+  const text = String(value ?? "").trim();
+  if (!text) throw new Error(`Invalid paper bet: missing ${name}`);
+  return text;
+}
+
+function validateRow(row) {
+  for (const name of [
+    "referenceEventId", "bookmaker", "bettableEventId", "firstSeenAt", "kickoffUtc",
+    "homeTeam", "awayTeam", "market", "outcome", "tier", "status",
+  ]) {
+    required(row[name], name);
+  }
+  finite(row.decimalOdds, "decimalOdds");
+  finite(row.fairOdds, "fairOdds");
+  finite(row.fairProbability, "fairProbability");
+  finite(row.ev, "ev");
+  finite(row.stake, "stake");
+  if (!VALID_STATUSES.has(row.status)) {
+    throw new Error(`Invalid paper bet status: ${row.status}`);
+  }
+}
+
+export function paperBetKey(row) {
+  return [
+    row.referenceEventId,
+    row.bookmaker,
+    row.market,
+    row.line ?? "",
+    row.outcome,
+  ].map((value) => String(value)).join("|");
+}
+
+function paperRow({ result, fixture }, firstSeenAt) {
+  return {
+    referenceEventId: String(fixture.referenceEventId),
+    bettableEventId: String(fixture.bettableEventId),
+    firstSeenAt,
+    kickoffUtc: fixture.kickoffUtc,
+    homeTeam: fixture.homeTeam,
+    awayTeam: fixture.awayTeam,
+    bookmaker: result.bookmaker,
+    market: result.market,
+    line: String(result.line ?? ""),
+    outcome: result.outcome,
+    decimalOdds: result.decimalOdds.toFixed(4),
+    fairOdds: result.fairOdds.toFixed(4),
+    fairProbability: result.fairProbability.toFixed(6),
+    ev: result.ev.toFixed(6),
+    tier: result.status,
+    stake: "1.00",
+    status: "PENDING",
+    homeScore: "",
+    awayScore: "",
+    profit: "",
+    settledAt: "",
+  };
+}
+
+export function mergePaperBets(existingRows, opportunities, { firstSeenAt }) {
+  for (const row of existingRows) validateRow(row);
+  const rows = existingRows.map((row) => ({ ...row }));
+  const keys = new Set(rows.map(paperBetKey));
+  let added = 0;
+  let duplicates = 0;
+
+  for (const opportunity of opportunities) {
+    const row = paperRow(opportunity, firstSeenAt);
+    const key = paperBetKey(row);
+    if (keys.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    keys.add(key);
+    rows.push(row);
+    added += 1;
+  }
+
+  return { rows, added, duplicates };
+}
+
+function scoreFor(event, team) {
+  const item = event.scores?.find((score) => score.name === team);
+  if (!item) return null;
+  const value = Number(item.score);
+  return Number.isFinite(value) ? value : null;
+}
+
+function isoOrBlank(value) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
+
+function resultStatus(row, homeScore, awayScore) {
+  if (row.market === "MATCH_RESULT") {
+    if (!["1", "X", "2"].includes(row.outcome)) return "REVIEW";
+    const winner = homeScore > awayScore ? "1" : awayScore > homeScore ? "2" : "X";
+    return row.outcome === winner ? "WON" : "LOST";
+  }
+  if (row.market !== "TOTALS") return "REVIEW";
+
+  const line = Number(row.line);
+  if (!Number.isFinite(line) || !Number.isInteger(line * 2)) return "REVIEW";
+  if (!["OVER", "UNDER"].includes(row.outcome)) return "REVIEW";
+
+  const total = homeScore + awayScore;
+  if (total === line) return "PUSH";
+  const over = total > line;
+  return (row.outcome === "OVER") === over ? "WON" : "LOST";
+}
+
+function profitFor(row, status) {
+  const stake = finite(row.stake, "stake");
+  if (status === "WON") return ((finite(row.decimalOdds, "decimalOdds") - 1) * stake).toFixed(4);
+  if (status === "LOST") return (-stake).toFixed(4);
+  if (status === "PUSH") return "0.0000";
+  return "";
+}
+
+export function settlePaperBets(rows, scoreEvents) {
+  const byId = new Map(scoreEvents.map((event) => [String(event.id), event]));
+  return rows.map((row) => {
+    validateRow(row);
+    if (TERMINAL_STATUSES.has(row.status)) return { ...row };
+    if (row.status !== "PENDING") throw new Error(`Invalid paper bet status: ${row.status}`);
+
+    const event = byId.get(String(row.referenceEventId));
+    if (!event?.completed) return { ...row };
+    const homeScore = scoreFor(event, row.homeTeam);
+    const awayScore = scoreFor(event, row.awayTeam);
+    if (homeScore === null || awayScore === null) return { ...row };
+
+    const status = resultStatus(row, homeScore, awayScore);
+    return {
+      ...row,
+      status,
+      homeScore: String(homeScore),
+      awayScore: String(awayScore),
+      profit: profitFor(row, status),
+      settledAt: isoOrBlank(event.last_update),
+    };
+  });
+}
+
+export function summarizePaperBets(rows) {
+  const summary = {
+    total: rows.length,
+    pending: 0,
+    settled: 0,
+    wins: 0,
+    losses: 0,
+    pushes: 0,
+    review: 0,
+    settledStake: 0,
+    profit: 0,
+    roi: null,
+  };
+  for (const row of rows) {
+    validateRow(row);
+    if (row.status === "PENDING") summary.pending += 1;
+    if (row.status === "REVIEW") summary.review += 1;
+    if (!SETTLED_STATUSES.has(row.status)) continue;
+    summary.settled += 1;
+    if (row.status === "WON") summary.wins += 1;
+    if (row.status === "LOST") summary.losses += 1;
+    if (row.status === "PUSH") summary.pushes += 1;
+    summary.settledStake += finite(row.stake, "stake");
+    summary.profit += finite(row.profit, "profit");
+  }
+  if (summary.settledStake > 0) summary.roi = summary.profit / summary.settledStake;
+  return summary;
+}
+
+export function findStalePending(rows, now, { days = 3 } = {}) {
+  const cutoff = now.getTime() - days * 24 * 60 * 60 * 1000;
+  return rows.filter((row) => {
+    if (row.status !== "PENDING") return false;
+    const kickoff = Date.parse(row.kickoffUtc);
+    return Number.isFinite(kickoff) && kickoff < cutoff;
+  });
+}
