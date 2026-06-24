@@ -216,10 +216,12 @@ does not document whether soccer scores after knockout matches represent
 `TOTALS` markets are full-time betting markets.
 
 Therefore the ledger is paper-performance evidence, not an authoritative
-bookmaker settlement record. Any completed knockout event known to have gone
-to extra time must be treated as `REVIEW` until the provider's soccer period
-semantics are confirmed or a period-level result source is added. This
-limitation is documented in CLI output and the README.
+bookmaker settlement record. Version 1 settles against the aggregate score
+returned by the provider because it has no reliable field with which to detect
+extra time. Every ROI summary prints that limitation. A knockout bet known to
+have gone to extra time must not be treated as bookmaker-accurate evidence
+until the provider's soccer period semantics are confirmed or a period-level
+result source is added.
 
 ## Architecture
 
