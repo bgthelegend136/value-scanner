@@ -14,6 +14,7 @@ import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
 import { matchFixtures } from "./match.mjs";
 import { consensusFairProbabilities, findValueBets } from "./value.mjs";
 import { formatAlert } from "./alert.mjs";
+import { PAPER_COLUMNS, mergePaperBets } from "./paper.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -62,6 +63,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPORTS_DIR = resolve(HERE, "..", "reports");
 
 const defaultFileExists = (path) => access(path).then(() => true, () => false);
+
+async function readCsvIfPresent(path) {
+  return await defaultFileExists(path) ? readCsv(path) : [];
+}
 
 async function defaultRunGit(startDir) {
   try {
@@ -349,6 +354,15 @@ async function runScan({
   await writeCsv(allPath, allRows, SCAN_COLUMNS);
   out(`Wrote ${opportunities.length} value bets to ${reportPath}\n`);
   out(`Full audit data (${allRows.length} rows) at ${allPath}\n`);
+
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  const existingPaperBets = await readCsvIfPresent(ledgerPath);
+  const merged = mergePaperBets(existingPaperBets, opportunities, {
+    firstSeenAt: now().toISOString(),
+  });
+  await writeCsv(ledgerPath, merged.rows, PAPER_COLUMNS);
+  out(`Recorded ${merged.added} new paper bet${merged.added === 1 ? "" : "s"}.\n`);
+  out(`Skipped ${merged.duplicates} duplicate paper bet${merged.duplicates === 1 ? "" : "s"}.\n`);
   return 0;
 }
 

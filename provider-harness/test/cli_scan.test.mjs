@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { runCli } from "../src/cli.mjs";
+import { readCsv } from "../src/csv.mjs";
 
 const ODDS_KEY = "oddsapi-secret";
 const THEODDS_KEY = "theodds-secret";
@@ -101,4 +102,36 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
     assert.doesNotMatch(raw, new RegExp(ODDS_KEY));
     assert.doesNotMatch(raw, new RegExp(THEODDS_KEY));
   }
+
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  const ledger = await readFile(ledgerPath, "utf8");
+  assert.match(ledger, /referenceEventId,bettableEventId,firstSeenAt/);
+  assert.match(ledger, /ref1,999,2026-06-24T12:00:05\.000Z/);
+  assert.match(ledger, /Stoiximan,MATCH_RESULT,,X,7\.5000/);
+  assert.match(out, /Recorded 1 new paper bet/);
+  assert.doesNotMatch(ledger, new RegExp(ODDS_KEY));
+  assert.doesNotMatch(ledger, new RegExp(THEODDS_KEY));
+});
+
+test("repeated scans do not duplicate the same paper bet", async () => {
+  const calls = [];
+  let out = "";
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-dedup-"));
+  const deps = {
+    out: (text) => { out += text; },
+    err: () => {},
+    loadApiKey: async () => ODDS_KEY,
+    loadTheOddsKey: async () => THEODDS_KEY,
+    createClient: () => fakeOddsApiClient(calls),
+    createTheOddsClient: () => fakeTheOddsClient(calls),
+    reportsDir,
+    now: () => new Date("2026-06-24T12:00:05.000Z"),
+  };
+
+  assert.equal(await runCli(["scan"], deps), 0);
+  assert.equal(await runCli(["scan"], deps), 0);
+
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows.length, 1);
+  assert.match(out, /Skipped 1 duplicate paper bet/);
 });
