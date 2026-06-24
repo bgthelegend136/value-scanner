@@ -36,5 +36,8 @@ export function createTheOddsApiClient({
     getOdds({ sportKey, regions = "eu", markets = "h2h,totals", oddsFormat = "decimal" }) {
       return request(`/sports/${sportKey}/odds`, { regions, markets, oddsFormat });
     },
+    getScores({ sportKey, daysFrom = 3, dateFormat = "iso" }) {
+      return request(`/sports/${sportKey}/scores`, { daysFrom, dateFormat });
+    },
   };
 }

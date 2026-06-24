@@ -35,6 +35,34 @@ test("calls documented events and odds endpoints with quota", async () => {
   assert.deepEqual(events.quota, { remaining: 498, used: 2, lastCost: 2 });
 });
 
+test("calls the scores endpoint with a three-day completed-game window", async () => {
+  const urls = [];
+  const client = createTheOddsApiClient({
+    apiKey: "secret",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonResponse([], {
+        headers: {
+          "x-requests-remaining": "496",
+          "x-requests-used": "4",
+          "x-requests-last": "2",
+        },
+      });
+    },
+  });
+
+  const response = await client.getScores({
+    sportKey: "soccer_fifa_world_cup",
+  });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/v4/sports/soccer_fifa_world_cup/scores");
+  assert.equal(url.searchParams.get("daysFrom"), "3");
+  assert.equal(url.searchParams.get("dateFormat"), "iso");
+  assert.equal(url.searchParams.get("apiKey"), "secret");
+  assert.deepEqual(response.quota, { remaining: 496, used: 4, lastCost: 2 });
+});
+
 test("redacts the key from provider failures", async () => {
   const key = "do-not-leak";
   const client = createTheOddsApiClient({
