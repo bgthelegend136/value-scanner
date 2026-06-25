@@ -30,11 +30,24 @@ export function createTheOddsApiClient({
   }
 
   return {
+    listSports({ all = false } = {}) {
+      return request("/sports", { all });
+    },
     listEvents({ sportKey }) {
       return request(`/sports/${sportKey}/events`, {});
     },
-    getOdds({ sportKey, regions = "eu", markets = "h2h,totals", oddsFormat = "decimal" }) {
-      return request(`/sports/${sportKey}/odds`, { regions, markets, oddsFormat });
+    getOdds({
+      sportKey,
+      regions = "eu",
+      markets = "h2h,totals",
+      oddsFormat = "decimal",
+      eventIds,
+      includeLinks = false,
+    }) {
+      const parameters = { regions, markets, oddsFormat };
+      if (eventIds?.length) parameters.eventIds = eventIds.join(",");
+      if (includeLinks) parameters.includeLinks = true;
+      return request(`/sports/${sportKey}/odds`, parameters);
     },
     getScores({ sportKey, daysFrom = 3, dateFormat = "iso" }) {
       return request(`/sports/${sportKey}/scores`, { daysFrom, dateFormat });

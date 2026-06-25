@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a scheduled multi-sport scanner that sends Telegram alerts only when Stoiximan or Superbet offers strictly more than 20% EV against both de-vigged Pinnacle and a median consensus of at least three other international bookmakers.
+**Goal:** Build a scheduled multi-sport scanner that sends Telegram alerts only when Stoiximan offers strictly more than 20% EV against both de-vigged Pinnacle and a median consensus of at least three other international bookmakers. (v1 scope: Stoiximan-only, MATCH_RESULT-only — see "v1 Scope Decisions and Verified Schema" below.)
 
 **Architecture:** Odds-API.io's value-bets endpoint supplies cheap candidates. Explicit sport/league mappings route only supported candidates to The Odds API, where exact-event and exact-market confirmation is calculated. A persistent queue enforces the two-sport-key quota cap; Telegram delivery, deduplication, audit state, and Windows Task Scheduler integration are separate modules.
 
@@ -26,6 +26,55 @@
 - Every production change follows red-green-refactor TDD and ends with a focused commit.
 
 **Spec:** `docs/superpowers/specs/2026-06-25-multisport-mispricing-alerts-design.md`
+
+---
+
+## v1 Scope Decisions and Verified Schema (AUTHORITATIVE — overrides any conflicting task text below)
+
+A live `/value-bets` capture on 2026-06-25 (76 real Stoiximan/Superbet candidates) corrected four wrong assumptions baked into the task fixtures. **Where any task below conflicts with this section, this section wins.** Do not "fix" the discrepancy back toward the old task text.
+
+### Scope (v1)
+
+- **Bookmaker: Stoiximan only.** `BOOKMAKERS = ["Stoiximan"]`. Drop Superbet from v1: the account's Superbet candidates link to `superbet.bet.br` (Brazil), a different market from Greek Superbet, so its odds/availability are not actionable here. Superbet returns only after a Greek Superbet source is confirmed. Remove Superbet from the bookmaker allowlist, the normalizer's accepted-bookmaker set, and the Task 8 `BOOKMAKERS` constant. (Task 1's client takes `bookmaker` as a parameter and is unchanged.)
+- **Market: MATCH_RESULT only.** Drop TOTALS from v1: the provider encodes totals as `betSide` `home`/`away` with the line in `hdp`, and the Over/Under direction is undocumented — a wrong guess is a confidently wrong bet. Supported markets = `MATCH_RESULT` only. Remove the TOTALS branch from `marketShape`, `selectionValue`, `selectionLink` (Task 2) and from `expectedOutcomes` (Task 5). Totals returns in v2 once the home/away→Over/Under direction is verified against The Odds API's explicit `over`/`under` outcomes.
+
+### Verified candidate schema (real shape)
+
+A real MATCH_RESULT candidate:
+
+```json
+{
+  "id": "72206156-ML-home-Stoiximan",
+  "eventId": 72206156,
+  "betSide": "home",
+  "bookmaker": "Stoiximan",
+  "expectedValue": 104.5707122715277,
+  "expectedValueUpdatedAt": "2026-06-25T17:02:03.498Z",
+  "market": { "name": "ML", "home": "1.788", "draw": "3.814", "away": "5.598", "max": 100 },
+  "bookmakerOdds": { "home": "1.87", "away": "4.05", "draw": "3.05", "href": "https://en.stoiximan.gr/match-odds/.../87733393/" },
+  "event": { "home": "Banfield", "away": "La Plata", "date": "2026-06-27T18:00:00Z", "sport": "Football", "league": "Argentina - Primera Division A, Women, Apertura" }
+}
+```
+
+Corrections vs. the task fixtures:
+
+1. **EV units.** `expectedValue` is an index ≈ `(offeredOdds / fairOdds) × 100`, **not** a percentage. Therefore:
+   - candidate EV fraction = `expectedValue / 100 - 1`;
+   - the ">20% candidate" prefilter is `expectedValue / 100 - 1 >= 0.20` (i.e. `expectedValue >= 120`);
+   - `providerExpectedValue = expectedValue / 100 - 1`.
+   Replace the plan's `finite(raw.expectedValue) >= 20` gate and `Number(raw.expectedValue) / 100` field accordingly. Fixture EVs must be ≥ 120 to represent a passing candidate (e.g. `124.5`); the `CANDIDATE_EV_BELOW_20` case uses e.g. `119.9`. (Market name `"ML"` and `"Moneyline"` both map to MATCH_RESULT; `betSide` is `home`/`away`/`draw`.)
+2. **`event.sport` / `event.league` are plain strings** (e.g. `"Basketball"`, `"Argentina - Primera Division A, Women, Apertura"`), not `{name, slug}` objects. The normalizer's `slug()`/`text()` already accept strings; fixtures must use strings. Expect very granular league slugs, so the registry stays sparse and grows from real `UNMAPPED_SPORT_LEAGUE` audit rows.
+3. **Link allowlist hosts.** Real Stoiximan links use `en.stoiximan.gr`. Allowlist must be `Stoiximan: ["stoiximan.gr", "www.stoiximan.gr", "en.stoiximan.gr", "m.stoiximan.gr"]`. Only the event-level `bookmakerOdds.href` is present — outcome/market deep links are absent — so the inline button is always EVENT depth and the message keeps the "find the exact pick" note.
+4. **MATCH_RESULT extraction** (already matches the plan): `betSide` home→`"1"`, draw→`"X"`, away→`"2"`; offered odds from `bookmakerOdds.home/draw/away`; per-book reference fair side from `market.home/draw/away`. Only the totals branch is removed.
+
+### Net task impact
+
+- **Task 1** — unchanged (client doesn't filter by EV).
+- **Task 2** — rewrite fixture to the real ML shape; fix EV units (prefilter + `providerExpectedValue`); remove the TOTALS branch; fix allowlist hosts; accepted-bookmaker set = `Stoiximan` only. Keep a `CANDIDATE_EV_BELOW_20` and an `UNSUPPORTED_MARKET` (e.g. a `Totals` or `Spread` item) rejection case.
+- **Task 5** — `expectedOutcomes` returns `{1,X,2}` for football and `{1,2}` otherwise; no TOTALS handling.
+- **Task 7** — `pickLabel` handles MATCH_RESULT only; keep the event-depth note.
+- **Task 8** — `BOOKMAKERS = ["Stoiximan"]`.
+- Confirmation EV math, strict `>0.20` thresholds, quota guard, state/queue/dedup, and scheduler — **unchanged**.
 
 ---
 

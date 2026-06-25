@@ -78,3 +78,39 @@ test("redacts the key from provider failures", async () => {
     },
   );
 });
+
+test("lists active sports without spending odds quota", async () => {
+  const urls = [];
+  const client = createTheOddsApiClient({
+    apiKey: "secret",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonResponse([{ key: "basketball_euroleague", active: true }]);
+    },
+  });
+
+  const response = await client.listSports();
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/v4/sports");
+  assert.equal(url.searchParams.get("all"), "false");
+  assert.deepEqual(response.data, [{ key: "basketball_euroleague", active: true }]);
+});
+
+test("filters odds by event ids and can request links", async () => {
+  const urls = [];
+  const client = createTheOddsApiClient({
+    apiKey: "secret",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonResponse([]);
+    },
+  });
+  await client.getOdds({
+    sportKey: "basketball_euroleague",
+    eventIds: ["a", "b"],
+    includeLinks: true,
+  });
+  const url = new URL(urls[0]);
+  assert.equal(url.searchParams.get("eventIds"), "a,b");
+  assert.equal(url.searchParams.get("includeLinks"), "true");
+});

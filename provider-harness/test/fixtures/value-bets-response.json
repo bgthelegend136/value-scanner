@@ -1,0 +1,46 @@
+[
+  {
+    "id": "72206156-ML-home-Stoiximan",
+    "expectedValue": 124.5,
+    "expectedValueUpdatedAt": "2026-06-25T08:55:00.000Z",
+    "betSide": "home",
+    "bookmaker": "Stoiximan",
+    "eventId": 72206156,
+    "event": {
+      "home": "Banfield",
+      "away": "Gimnasia La Plata",
+      "date": "2026-06-25T18:30:00.000Z",
+      "sport": "Football",
+      "league": "Argentina - Primera Division A"
+    },
+    "market": { "name": "ML", "home": "1.788", "draw": "3.814", "away": "5.598", "max": 100 },
+    "bookmakerOdds": {
+      "home": "2.40",
+      "draw": "3.05",
+      "away": "4.05",
+      "href": "https://en.stoiximan.gr/match-odds/banfield-gimnasia-la-plata/87733393/"
+    }
+  },
+  {
+    "id": "totals-dropped-in-v1",
+    "expectedValue": 130,
+    "expectedValueUpdatedAt": "2026-06-25T08:55:00.000Z",
+    "betSide": "home",
+    "bookmaker": "Stoiximan",
+    "eventId": 67620068,
+    "event": {
+      "home": "Bendigo Braves",
+      "away": "Casey Cavaliers",
+      "date": "2026-06-25T18:30:00.000Z",
+      "sport": "Basketball",
+      "league": "Australia - NBL1 South, Women"
+    },
+    "market": { "name": "Totals", "hdp": 169.5, "home": "1.80", "away": "1.83", "max": 50 },
+    "bookmakerOdds": {
+      "home": "1.80",
+      "away": "1.83",
+      "hdp": "169.5",
+      "href": "https://en.stoiximan.gr/match-odds/bendigo-casey/87637098/"
+    }
+  }
+]
