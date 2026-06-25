@@ -31,6 +31,7 @@ import { loadSportRegistry } from "./multisport_map.mjs";
 import { runMispricingScan } from "./mispricing_scan.mjs";
 import { matchCandidateEvent } from "./mispricing_match.mjs";
 import { confirmCandidate } from "./mispricing_confirm.mjs";
+import { parseLegPick, legFairProbabilities } from "./boost_legs.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -645,40 +646,38 @@ async function runBoostCheck(rest, { loadTheOddsKey, createTheOddsClient, out, e
 }
 
 // Resolve one combo leg to its de-vigged fair probabilities (Pinnacle + consensus)
-// using the same matching + confirmation path as a single selection. The EV here
-// is irrelevant (placeholder odds); we only want the fair probabilities to
-// multiply across legs.
+// across market types (1X2, double chance, totals — see boost_legs.mjs). The leg
+// pick token decides the market, so a Bet Builder boost can mix leg types.
 async function priceBoostLeg(client, leg, now) {
+  const spec = parseLegPick(leg.pick);
+  if (!spec) return { ok: false, reason: "UNSUPPORTED_LEG_PICK", leg };
   const candidate = {
-    sportSlug: leg.sportKey.startsWith("soccer") ? "football" : "other",
-    leagueSlug: "",
     kickoffUtc: new Date(leg.date).toISOString(),
     participantOne: leg.home,
     participantTwo: leg.away,
-    market: "MATCH_RESULT",
-    line: "",
-    outcome: leg.pick,
-    offeredOdds: 2,
   };
   const events = await client.listEvents({ sportKey: leg.sportKey });
   const match = matchCandidateEvent(candidate, events.data ?? []);
   if (!match.event) return { ok: false, reason: match.reason, leg };
+  // Totals legs need the totals market; everything else rides the h2h line.
+  const markets = spec.market === "TOTALS" ? "totals" : "h2h";
   const odds = await client.getOdds({
     sportKey: leg.sportKey,
     eventIds: [String(match.event.id)],
-    markets: "h2h",
+    markets,
   });
   const selections = normalizeTheOddsResponse(odds.data ?? [], odds.receivedAt);
-  const result = confirmCandidate(candidate, match.event, selections, { now: now() });
+  const fair = legFairProbabilities(selections, match.event.id, spec, { now: now() });
   const quota = odds.quota?.remaining;
-  if (result.pinnacleFairProbability === undefined) {
-    return { ok: false, reason: result.reason, leg, quota };
+  if (!(fair.pinnacleFairProbability > 0)) {
+    return { ok: false, reason: fair.reason, leg, quota };
   }
   return {
     ok: true,
     leg,
-    pinnacleFairProbability: result.pinnacleFairProbability,
-    consensusFairProbability: result.consensusFairProbability,
+    spec,
+    pinnacleFairProbability: fair.pinnacleFairProbability,
+    consensusFairProbability: fair.consensusFairProbability,
     quota,
   };
 }
@@ -703,9 +702,9 @@ async function runBoostCombo(rest, { loadTheOddsKey, createTheOddsClient, out, e
     return 1;
   }
   for (const leg of legs) {
-    if (!leg.sportKey || !leg.home || !leg.away || !leg.date || !["1", "X", "2"].includes(leg.pick) ||
+    if (!leg.sportKey || !leg.home || !leg.away || !leg.date || !parseLegPick(leg.pick) ||
       !Number.isFinite(new Date(leg.date).getTime())) {
-      err('boost-combo: each --leg needs "sportKey;home;away;date;pick" with pick 1|X|2 and a valid date\n');
+      err('boost-combo: each --leg needs "sportKey;home;away;date;pick"; pick = 1|X|2, double chance 1X|12|X2, or totals O2.5|U2.5\n');
       return 1;
     }
   }

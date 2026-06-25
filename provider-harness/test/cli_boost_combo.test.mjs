@@ -83,6 +83,25 @@ test("boost-combo prices a multi-leg parlay against real sharp odds", async () =
   assert.match(out, /Verdict:/);
 });
 
+test("boost-combo prices a double-chance leg from the 1X2 line", async () => {
+  let out = "";
+  const calls = [];
+  const code = await runCli(
+    [
+      "boost-combo",
+      "--boost=1.50",
+      "--leg=soccer_fifa_world_cup;Japan;Sweden;2026-06-26T18:30:00Z;X2",
+      "--leg=soccer_fifa_world_cup;Brazil;Serbia;2026-06-26T21:00:00Z;1",
+    ],
+    deps({ out: (text) => { out += text; }, calls }),
+  );
+
+  assert.equal(code, 0);
+  assert.match(out, /Leg 1: Japan vs Sweden pick X2/);
+  assert.match(out, /Pinnacle fair odds \(combo\)/);
+  assert.match(out, /Verdict:/);
+});
+
 test("boost-combo refuses to verify when a leg cannot be matched", async () => {
   let out = "";
   const calls = [];
