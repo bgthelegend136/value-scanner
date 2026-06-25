@@ -25,7 +25,12 @@ export function createValueBetsClient({
       url.searchParams.set("bookmaker", bookmaker);
       url.searchParams.set("includeEventDetails", String(includeEventDetails));
 
-      const response = await fetchImpl(url);
+      let response;
+      try {
+        response = await fetchImpl(url);
+      } catch {
+        throw new Error("Odds-API.io value-bets network request failed");
+      }
       const receivedAt = new Date().toISOString();
       if (!response.ok) {
         throw new Error(

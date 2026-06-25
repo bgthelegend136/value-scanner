@@ -79,6 +79,26 @@ test("redacts the key from provider failures", async () => {
   );
 });
 
+test("redacts the key from network-level provider failures", async () => {
+  const key = "network-secret";
+  const client = createTheOddsApiClient({
+    apiKey: key,
+    fetchImpl: async (url) => {
+      throw new Error(`connection failed for ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () => client.listSports(),
+    (error) => {
+      assert.match(error.message, /The Odds API network request failed/);
+      assert.doesNotMatch(error.message, new RegExp(key));
+      assert.doesNotMatch(error.message, /apiKey=/);
+      return true;
+    },
+  );
+});
+
 test("lists active sports without spending odds quota", async () => {
   const urls = [];
   const client = createTheOddsApiClient({

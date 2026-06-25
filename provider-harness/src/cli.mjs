@@ -24,6 +24,11 @@ import {
   summarizeClv,
   summarizePaperBets,
 } from "./paper.mjs";
+import { createValueBetsClient } from "./value_bets_client.mjs";
+import { createTelegramClient } from "./telegram.mjs";
+import { createMispricingState } from "./mispricing_state.mjs";
+import { loadSportRegistry } from "./multisport_map.mjs";
+import { runMispricingScan } from "./mispricing_scan.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -70,6 +75,7 @@ const SUMMARY_COLUMNS = [
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPORTS_DIR = resolve(HERE, "..", "reports");
+const DEFAULT_SPORT_MAP = resolve(HERE, "..", "config", "multisport-map.json");
 
 const defaultFileExists = (path) => access(path).then(() => true, () => false);
 
@@ -124,6 +130,17 @@ async function defaultLoadTheOddsKey() {
   const envPath = await resolveEnvPath(process.cwd());
   const env = await loadEnvFile(envPath);
   return requireKey(env, "THE_ODDS_API_KEY");
+}
+
+async function defaultLoadMispricingConfig() {
+  const envPath = await resolveEnvPath(process.cwd());
+  const env = await loadEnvFile(envPath);
+  return {
+    oddsApiKey: requireKey(env, "ODDS_API_IO_KEY"),
+    theOddsApiKey: requireKey(env, "THE_ODDS_API_KEY"),
+    telegramToken: requireKey(env, "TELEGRAM_BOT_TOKEN"),
+    telegramChatId: requireKey(env, "TELEGRAM_CHAT_ID"),
+  };
 }
 
 function formatRateLimit(rateLimit) {
@@ -565,6 +582,13 @@ export async function runCli(argv, deps = {}) {
     createTheOddsClient = createTheOddsApiClient,
     reportsDir = DEFAULT_REPORTS_DIR,
     now = () => new Date(),
+    loadMispricingConfig = defaultLoadMispricingConfig,
+    createValueBetsClient: createValueBets = createValueBetsClient,
+    createTelegramClient: createTelegram = createTelegramClient,
+    createState = createMispricingState,
+    loadRegistry = loadSportRegistry,
+    runMispricing = runMispricingScan,
+    sportMapPath = DEFAULT_SPORT_MAP,
   } = deps;
 
   const [command, ...rest] = argv;
@@ -610,9 +634,44 @@ export async function runCli(argv, deps = {}) {
       }
       return await runEvaluate(csvPath, { out, reportsDir, now });
     }
+    if (command === "telegram-test") {
+      const config = await loadMispricingConfig();
+      const telegram = createTelegram({
+        token: config.telegramToken,
+        chatId: config.telegramChatId,
+      });
+      const result = await telegram.sendText(
+        `Telegram connection test — ${now().toISOString()}`,
+      );
+      out(`Telegram test sent (message ${result.messageId}).\n`);
+      return 0;
+    }
+    if (command === "mispricing-scan") {
+      const unsupported = rest.filter((arg) => arg !== "--dry-run");
+      if (unsupported.length > 0) {
+        err(`unsupported mispricing-scan option: ${unsupported[0]}\n`);
+        return 1;
+      }
+      const config = await loadMispricingConfig();
+      await runMispricing({
+        valueBetsClient: createValueBets({ apiKey: config.oddsApiKey }),
+        referenceClient: createTheOddsClient({ apiKey: config.theOddsApiKey }),
+        telegramClient: createTelegram({
+          token: config.telegramToken,
+          chatId: config.telegramChatId,
+        }),
+        state: createState({ reportsDir }),
+        registry: await loadRegistry(sportMapPath),
+        reportsDir,
+        now: now(),
+        dryRun: rest.includes("--dry-run"),
+        out,
+      });
+      return 0;
+    }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | evaluate <capture.csv>>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | evaluate <capture.csv> | mispricing-scan [--dry-run] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

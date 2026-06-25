@@ -1,3 +1,9 @@
 {
-  "football|international-fifa-world-cup": "soccer_fifa_world_cup"
+  "american-football|usa-nfl": "americanfootball_nfl",
+  "baseball|japan-professional-baseball-central-league": "baseball_npb",
+  "football|brazil-brasileiro-serie-b": "soccer_brazil_serie_b",
+  "football|england-premier-league": "soccer_epl",
+  "football|international-fifa-world-cup": "soccer_fifa_world_cup",
+  "football|italy-serie-a": "soccer_italy_serie_a",
+  "football|sweden-superettan": "soccer_sweden_superettan"
 }

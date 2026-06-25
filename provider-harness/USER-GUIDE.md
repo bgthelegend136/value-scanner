@@ -281,3 +281,104 @@ node src/cli.mjs settle        ← τράβα σκορ, υπολόγισε ROI
 
 Αρχεία κώδικα: `src/theodds_client.mjs`, `src/theodds_normalize.mjs`, `src/match.mjs`,
 `src/value.mjs`, `src/alert.mjs`, `src/cli.mjs`.
+
+---
+
+## 11. Telegram ειδοποιήσεις για λάθη αποδόσεων
+
+Το `mispricing-scan` είναι ξεχωριστό mode για μεγάλες αποκλίσεις σε Stoiximan
+ή Superbet. Στην πρώτη έκδοση ελέγχει μόνο pre-match νικητή αγώνα /
+moneyline / 1Χ2, αλλά όχι μόνο ποδόσφαιρο ή Μουντιάλ: εξετάζει candidates από
+οποιοδήποτε sport επιστρέφει ο provider.
+
+Ένα Telegram alert στέλνεται μόνο όταν:
+
+- το αρχικό candidate έχει τουλάχιστον 10% EV,
+- η δική μας επανεκτίμηση είναι **αυστηρά πάνω από 10%** έναντι de-vigged
+  Pinnacle,
+- είναι επίσης αυστηρά πάνω από 10% έναντι median consensus τουλάχιστον τριών
+  άλλων διεθνών bookmakers,
+- ταιριάζουν ακριβώς αγώνας, επιλογή και αγορά,
+- τα δεδομένα είναι φρέσκα και ο αγώνας δεν έχει αρχίσει.
+
+Η λίγκα πρέπει να υπάρχει και στον reference provider. Οι μοναδικές ακριβείς
+αντιστοιχίες ενεργών τίτλων γίνονται αυτόματα, ενώ γνωστά aliases βρίσκονται
+στο `config/multisport-map.json`. Αν δεν υπάρχει reference coverage ή η
+αντιστοίχιση είναι αμφίβολη, δεν στέλνεται alert.
+
+Το 10,0% ακριβώς στην τελική επιβεβαίωση δεν περνά.
+
+### Ρύθμιση Telegram
+
+Στο root `.env.local` πρόσθεσε:
+
+```text
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+```
+
+Το token δημιουργείται από το επίσημο `@BotFather`. Στείλε πρώτα ένα μήνυμα
+στο bot και βρες το προσωπικό chat id μέσω της επίσημης Telegram Bot API
+μεθόδου `getUpdates`. Μην βάζεις token σε screenshots, logs ή commits.
+
+Δοκιμή σύνδεσης:
+
+```powershell
+node src/cli.mjs telegram-test
+```
+
+Δοκιμή χωρίς αποστολή Telegram:
+
+```powershell
+node src/cli.mjs mispricing-scan --dry-run
+```
+
+Κανονική εκτέλεση:
+
+```powershell
+node src/cli.mjs mispricing-scan
+```
+
+Το κουμπί του Telegram χρησιμοποιεί μόνο allowlisted HTTPS link. Προσπαθεί να
+ανοίξει πρώτα την ακριβή επιλογή και διαφορετικά τη σελίδα αγώνα. Πάντα έλεγξε
+χειροκίνητα bookmaker, περιοχή, αγώνα, αγορά, επιλογή και τρέχουσα απόδοση.
+Ειδικά τα Superbet links του provider μπορεί να δείχνουν στο
+`superbet.bet.br` αντί για το ελληνικό προϊόν.
+
+### Αυτόματη εκτέλεση Windows
+
+Αφού περάσουν το `telegram-test` και ένα `--dry-run`, εγκατάστησε το task:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-mispricing-task.ps1
+```
+
+Τρέχει καθημερινά στις **09:00, 15:00 και 21:00**, με τοπική ώρα Windows.
+Ο υπολογιστής πρέπει να είναι ανοιχτός, συνδεδεμένος στον λογαριασμό Windows
+και online.
+
+Έλεγχος:
+
+```powershell
+Get-ScheduledTask -TaskName Bet-Mispricing-Scanner
+```
+
+Προσωρινή απενεργοποίηση και επανενεργοποίηση:
+
+```powershell
+Disable-ScheduledTask -TaskName Bet-Mispricing-Scanner
+Enable-ScheduledTask -TaskName Bet-Mispricing-Scanner
+```
+
+Η εγκατάσταση απενεργοποιεί το παλιό read-only task
+`Bet-Mispricing-Funnel`, ώστε να μην καταναλώνουν και τα δύο API quota.
+
+### Τοπικά αρχεία κατάστασης
+
+- `reports/mispricing-queue.csv` — candidates που περιμένουν retry.
+- `reports/mispricing-alerts.csv` — επιτυχημένες Telegram αποστολές.
+- `reports/mispricing-audit.csv` — confirmed/rejected/deferred/errors.
+- `reports/mispricing-health.json` — συνεχόμενες τεχνικές αποτυχίες.
+- `reports/logs/` — ημερήσια logs του scheduled task.
+
+Όλα τα παραπάνω είναι git-ignored και μένουν τοπικά.

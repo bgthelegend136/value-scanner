@@ -21,7 +21,12 @@ export function createTheOddsApiClient({
     for (const [name, value] of Object.entries(parameters)) {
       url.searchParams.set(name, String(value));
     }
-    const response = await fetchImpl(url);
+    let response;
+    try {
+      response = await fetchImpl(url);
+    } catch {
+      throw new Error("The Odds API network request failed");
+    }
     const receivedAt = new Date().toISOString();
     if (!response.ok) {
       throw new Error(`The Odds API request failed with status ${response.status}`);

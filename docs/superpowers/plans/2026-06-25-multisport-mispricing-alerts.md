@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a scheduled multi-sport scanner that sends Telegram alerts only when Stoiximan offers strictly more than 20% EV against both de-vigged Pinnacle and a median consensus of at least three other international bookmakers. (v1 scope: Stoiximan-only, MATCH_RESULT-only — see "v1 Scope Decisions and Verified Schema" below.)
+**Goal:** Build a scheduled multi-sport scanner that sends Telegram alerts only when Stoiximan or Superbet offers strictly more than 10% EV against both de-vigged Pinnacle and a median consensus of at least three other international bookmakers. See the authoritative v1 scope below.
 
 **Architecture:** Odds-API.io's value-bets endpoint supplies cheap candidates. Explicit sport/league mappings route only supported candidates to The Odds API, where exact-event and exact-market confirmation is calculated. A persistent queue enforces the two-sport-key quota cap; Telegram delivery, deduplication, audit state, and Windows Task Scheduler integration are separate modules.
 
@@ -12,12 +12,12 @@
 
 - Work only in `C:\Users\bgthe\Documents\bet\.worktrees\multisport-mispricing-alerts` on branch `codex/multisport-mispricing-alerts`.
 - Preserve all existing `scan`, `settle`, `clv`, `boost`, capture, and evaluation behavior.
-- Support only pre-match full-event `MATCH_RESULT` and featured `TOTALS`.
-- Final alert threshold is strict: `pinnacleEv > 0.20` and `consensusEv > 0.20`; exactly 20.0% does not pass.
+- Support only pre-match full-event `MATCH_RESULT` in v1.
+- Final alert threshold is strict: `pinnacleEv > 0.10` and `consensusEv > 0.10`; exactly 10.0% does not pass.
 - Require Pinnacle plus at least three other complete international bookmaker markets.
-- Require exact market, outcome, period, and totals-line equality.
+- Require exact market, outcome, and period equality.
 - Candidate and reference timestamps must be valid and no more than 10 minutes old.
-- Confirm at most two The Odds API sport keys and spend at most four reference credits per run.
+- Confirm at most two The Odds API sport keys and spend at most two reference credits per run.
 - Stop confirmation when The Odds API remaining quota is at or below the 100-credit reserve.
 - Never send a betting alert based only on Odds-API.io's EV.
 - Never scrape, log in, place a bet, fabricate a bookmaker URL, or expose any API key/token.
@@ -67,11 +67,11 @@ Corrections vs. the task fixtures:
 ### Net task impact
 
 - **Task 1** — unchanged (client doesn't filter by EV).
-- **Task 2** — rewrite fixture to the real ML shape; fix EV units (prefilter + `providerExpectedValue`); remove the TOTALS branch; fix allowlist hosts; accepted-bookmaker set = `Stoiximan` only. Keep a `CANDIDATE_EV_BELOW_20` and an `UNSUPPORTED_MARKET` (e.g. a `Totals` or `Spread` item) rejection case.
+- **Task 2** — rewrite fixture to the real ML shape; fix EV units (prefilter + `providerExpectedValue`); remove the TOTALS branch; fix allowlist hosts; accepted-bookmaker set = `Stoiximan` and `Superbet`. Keep a `CANDIDATE_EV_BELOW_MIN` and an `UNSUPPORTED_MARKET` rejection case.
 - **Task 5** — `expectedOutcomes` returns `{1,X,2}` for football and `{1,2}` otherwise; no TOTALS handling.
 - **Task 7** — `pickLabel` handles MATCH_RESULT only; keep the event-depth note.
-- **Task 8** — `BOOKMAKERS = ["Stoiximan"]`.
-- Confirmation EV math, strict `>0.20` thresholds, quota guard, state/queue/dedup, and scheduler — **unchanged**.
+- **Task 8** — `BOOKMAKERS = ["Stoiximan", "Superbet"]`.
+- Confirmation EV math, strict `>0.10` thresholds, quota guard, state/queue/dedup, and scheduler use the shared threshold constants.
 
 ---
 

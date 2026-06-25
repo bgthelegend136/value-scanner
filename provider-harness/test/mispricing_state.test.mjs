@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import {
+  candidateIdentity,
+  createMispricingState,
+  mergeQueue,
+  selectSportGroups,
+  shouldSendAlert,
+} from "../src/mispricing_state.mjs";
+
+function candidate(overrides = {}) {
+  return {
+    candidateId: "c1", providerEventId: "501", bookmaker: "Stoiximan",
+    sportKey: "soccer_fifa_world_cup", kickoffUtc: "2026-06-25T18:30:00Z",
+    market: "MATCH_RESULT", line: "", outcome: "1",
+    offeredOdds: 2.4, providerExpectedValue: 0.15,
+    firstQueuedAt: "2026-06-25T08:00:00Z",
+    ...overrides,
+  };
+}
+
+test("candidate identity includes event, bookmaker, market, line, and outcome", () => {
+  assert.equal(
+    candidateIdentity(candidate()),
+    "501|Stoiximan|MATCH_RESULT||1",
+  );
+});
+
+test("queue keeps latest odds but preserves first queued time and removes started events", () => {
+  const existing = [candidate({ offeredOdds: 2.2 })];
+  const incoming = [candidate({ offeredOdds: 2.5, firstQueuedAt: "" })];
+  const rows = mergeQueue(existing, incoming, {
+    now: new Date("2026-06-25T09:00:00Z"),
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].offeredOdds, 2.5);
+  assert.equal(rows[0].firstQueuedAt, "2026-06-25T08:00:00Z");
+  assert.equal(
+    mergeQueue(rows, [], { now: new Date("2026-06-25T19:00:00Z") }).length,
+    0,
+  );
+});
+
+test("selects at most two sport groups by EV, kickoff, then queue age", () => {
+  const selected = selectSportGroups([
+    candidate({ sportKey: "sport-a", providerExpectedValue: 0.12 }),
+    candidate({ sportKey: "sport-b", providerExpectedValue: 0.40 }),
+    candidate({ sportKey: "sport-c", providerExpectedValue: 0.30 }),
+  ]);
+  assert.deepEqual([...selected.keys()], ["sport-b", "sport-c"]);
+});
+
+test("dedup sends first alert and only updates after five percentage points", () => {
+  assert.equal(shouldSendAlert(null, { minimumConfirmedEv: 0.14 }), true);
+  assert.equal(
+    shouldSendAlert({ minimumConfirmedEv: "0.14" }, { minimumConfirmedEv: 0.189 }),
+    false,
+  );
+  assert.equal(
+    shouldSendAlert({ minimumConfirmedEv: "0.14" }, { minimumConfirmedEv: 0.19 }),
+    true,
+  );
+});
+
+test("repository refuses corrupt health JSON and writes CSV state", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "mispricing-state-"));
+  const state = createMispricingState({ reportsDir });
+  await state.writeQueue([candidate()]);
+  assert.match(await readFile(join(reportsDir, "mispricing-queue.csv"), "utf8"), /candidateId/);
+  const restored = await state.readQueue();
+  assert.equal(typeof restored[0].offeredOdds, "number");
+  assert.equal(typeof restored[0].providerExpectedValue, "number");
+
+  await writeFile(join(reportsDir, "mispricing-health.json"), "{broken");
+  await assert.rejects(() => state.readHealth(), /invalid mispricing health state/);
+  assert.equal(await readFile(join(reportsDir, "mispricing-health.json"), "utf8"), "{broken");
+});
+
+test("repository rejects malformed queue CSV without rewriting it", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "mispricing-corrupt-csv-"));
+  const path = join(reportsDir, "mispricing-queue.csv");
+  const original = "candidateId,providerEventId\nc1,\n";
+  await writeFile(path, original);
+  const state = createMispricingState({ reportsDir });
+  await assert.rejects(() => state.readQueue(), /invalid mispricing queue row/);
+  assert.equal(await readFile(path, "utf8"), original);
+});

@@ -61,3 +61,23 @@ test("redacts provider body and key from value-bet failures", async () => {
     },
   );
 });
+
+test("redacts the key from network-level value-bet failures", async () => {
+  const key = "network-secret";
+  const client = createValueBetsClient({
+    apiKey: key,
+    fetchImpl: async (url) => {
+      throw new Error(`connection failed for ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () => client.getValueBets({ bookmaker: "Stoiximan" }),
+    (error) => {
+      assert.match(error.message, /Odds-API\.io value-bets network request failed/);
+      assert.doesNotMatch(error.message, new RegExp(key));
+      assert.doesNotMatch(error.message, /apiKey=/);
+      return true;
+    },
+  );
+});

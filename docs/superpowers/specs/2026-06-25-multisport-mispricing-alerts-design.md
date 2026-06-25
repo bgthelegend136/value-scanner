@@ -1,5 +1,24 @@
 # Multi-Sport Mispricing Telegram Alerts — Design
 
+## v1 Implementation Amendment (Authoritative)
+
+Live Odds-API.io schema validation changed the first implementation from the
+original proposal below:
+
+- The detector now targets bookmaker mistakes at a **10% floor**, not 20%.
+  Candidate EV must be at least 10%; independently recalculated Pinnacle and
+  consensus EV must each be strictly above 10%.
+- Both **Stoiximan and Superbet** are scanned. Superbet provider links may
+  target `superbet.bet.br`, so regional availability must be checked manually.
+- v1 supports only pre-match full-event **MATCH_RESULT / moneyline / 1X2**.
+  TOTALS is deferred because Odds-API.io's candidate-side encoding does not
+  document the Over/Under direction safely enough.
+- Each verified sport therefore requests only `h2h`, costing one The Odds API
+  credit rather than two.
+
+This amendment supersedes conflicting 20% or TOTALS requirements later in this
+historical design.
+
 ## Goal
 
 Add a separate `mispricing-scan` mode that searches Stoiximan and Superbet for
@@ -7,7 +26,7 @@ large pre-match pricing errors across every sport exposed by the existing data
 providers.
 
 An alert is actionable only when the offered price has **strictly more than
-20.0% expected value** against both:
+10.0% expected value** against both:
 
 1. Pinnacle's independently de-vigged price; and
 2. a median consensus built from at least three other international

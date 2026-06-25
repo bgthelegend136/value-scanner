@@ -15,7 +15,9 @@ the harness only compares the two.
 ## What it is not
 
 - It does **not** scrape or automate bookmaker websites.
-- It does **not** place bets or generate actionable alerts.
+- It does **not** place bets. The optional `mispricing-scan` mode can send
+  informational Telegram alerts, but only after independent confirmation and
+  with an explicit manual-verification warning.
 - It does **not** prove regional identity. A bookmaker name alone is not proof
   that a feed is the Greece-facing product. Every captured selection is recorded
   with `regionalStatus = UNVERIFIED` until the provider supplies an explicit feed
@@ -29,10 +31,80 @@ the harness only compares the two.
 
   ```
   ODDS_API_IO_KEY=your-key-here
+  THE_ODDS_API_KEY=your-second-provider-key
+  TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+  TELEGRAM_CHAT_ID=your-private-chat-id
   ```
 
 The key is read only from `.env.local`. It is never printed, persisted, or
 included in error messages or request URLs.
+
+## Multi-sport bookmaker-mistake alerts
+
+`mispricing-scan` is a separate mode for detecting unusually large pre-match
+pricing mistakes at Stoiximan or Superbet across all sports returned by the
+candidate provider.
+
+```powershell
+node src/cli.mjs telegram-test
+node src/cli.mjs mispricing-scan --dry-run
+node src/cli.mjs mispricing-scan
+```
+
+The v1 contract is deliberately narrow:
+
+- candidates must show at least 10% provider EV;
+- only full-event `MATCH_RESULT`/moneyline/1X2 is supported;
+- final EV must be strictly above 10% against both de-vigged Pinnacle and the
+  median fair probability of at least three other complete international
+  bookmaker markets;
+- candidate and reference prices must be fresh and the event must be pre-match;
+- the league must have reference coverage; exact normalized active-sport titles
+  are mapped automatically, while known provider aliases use the explicit
+  `config/multisport-map.json` registry;
+- at most two reference sport keys are checked per run;
+- no alert is sent if matching, freshness, Pinnacle, consensus, quota, or
+  Telegram delivery checks fail.
+
+The Telegram message contains the exact event, selection, offered odds,
+Pinnacle/consensus fair odds and EV, plus an allowlisted Stoiximan/Superbet
+button when the provider supplies a safe HTTPS link. The link may open the
+event rather than a pre-filled betslip; always verify the exact market and
+price manually.
+
+This is not restricted to football or the World Cup. Candidates from any sport
+are considered, but no alert is possible when The Odds API has no matching
+active competition or when the league identity is ambiguous.
+
+Superbet candidate links currently observed from the provider may target
+`superbet.bet.br`, not the Greece-facing product. Such alerts are useful for
+detection only and require extra manual regional verification.
+
+Runtime state is local and git-ignored:
+
+- `reports/mispricing-queue.csv` — candidates deferred or awaiting retry;
+- `reports/mispricing-alerts.csv` — successfully delivered alerts;
+- `reports/mispricing-audit.csv` — confirmed, rejected, deferred, and failed
+  decisions;
+- `reports/mispricing-health.json` — consecutive provider/Telegram failures;
+- `reports/logs/` — scheduler transcripts.
+
+Install the production Windows task after both Telegram values are present:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-mispricing-task.ps1
+```
+
+It runs daily at **09:00, 15:00, and 21:00 local Windows time**, starts missed
+runs when possible, prevents overlapping instances, and disables the older
+read-only `Bet-Mispricing-Funnel` sampler to avoid duplicate API usage.
+
+Inspect or disable it with:
+
+```powershell
+Get-ScheduledTask -TaskName Bet-Mispricing-Scanner
+Disable-ScheduledTask -TaskName Bet-Mispricing-Scanner
+```
 
 ## Commands
 
@@ -207,7 +279,8 @@ suite; live use is opt-in and quota-safe.
 
 - Key read only from `.env.local`; never printed, persisted, or placed in errors
   or URLs.
-- No bookmaker-site scraping, automation, login, betting, or alerts.
+- No bookmaker-site scraping, login, or betting. Telegram alerting is limited
+  to the independently confirmed `mispricing-scan` mode.
 - Raw API responses are not retained — only sanitized selections, timestamps,
   and comparison records.
 - Regional identity remains `UNVERIFIED` pending explicit provider confirmation.
