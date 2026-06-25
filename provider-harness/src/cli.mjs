@@ -14,6 +14,7 @@ import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
 import { matchFixtures } from "./match.mjs";
 import { consensusFairProbabilities, devigPower, findValueBets } from "./value.mjs";
 import { formatAlert } from "./alert.mjs";
+import { MARKET_MARGINS, analyzeBoost, comboOverround } from "./boost.mjs";
 import {
   PAPER_COLUMNS,
   applyClosingLine,
@@ -489,6 +490,71 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
   return 0;
 }
 
+function flag(rest, name) {
+  const hit = rest.find((a) => a.startsWith(`--${name}=`));
+  return hit ? hit.split("=")[1] : undefined;
+}
+
+// `boost` is pure arithmetic — no network, no keys, no quota.
+function runBoost(rest, { out, err }) {
+  const baseOdds = Number(flag(rest, "base"));
+  const boostedOdds = Number(flag(rest, "boost"));
+  if (!Number.isFinite(baseOdds) || !Number.isFinite(boostedOdds)) {
+    err("usage: boost --base=<odds> --boost=<odds> [--market=<type> [--legs=N] | --margin=<percent>]\n");
+    return 1;
+  }
+
+  const marginFlag = flag(rest, "margin");
+  const marketFlag = flag(rest, "market");
+  const legs = Number(flag(rest, "legs") ?? 1);
+
+  let overround;
+  let assumption;
+  if (marginFlag != null) {
+    overround = Number(marginFlag) / 100;
+    assumption = `assumed total margin ${Number(marginFlag).toFixed(1)}%`;
+  } else if (marketFlag != null) {
+    const perLeg = MARKET_MARGINS[marketFlag];
+    if (perLeg === undefined) {
+      err(`unknown market: ${marketFlag}\nknown markets: ${Object.keys(MARKET_MARGINS).join(", ")}\n`);
+      return 1;
+    }
+    overround = comboOverround(perLeg, legs);
+    assumption = `${marketFlag} ×${legs} leg(s) → overround ${(overround * 100).toFixed(1)}%`;
+  }
+
+  let analysis;
+  try {
+    analysis = analyzeBoost({ baseOdds, boostedOdds, overround });
+  } catch (error) {
+    err(`error: ${error.message}\n`);
+    return 1;
+  }
+
+  const lines = [
+    `Boost check: ${baseOdds} → ${boostedOdds}`,
+    `Boost multiplier: ×${analysis.multiplier.toFixed(3)} (${signed(analysis.breakEvenMargin * 100, 1)}%)`,
+    `Break-even: +EV as long as the base-market margin is under ${(analysis.breakEvenMargin * 100).toFixed(1)}%.`,
+  ];
+
+  if (analysis.ev === undefined) {
+    lines.push("");
+    lines.push("No market given — typical TOTAL margins to compare against:");
+    for (const [name, margin] of Object.entries(MARKET_MARGINS)) {
+      lines.push(`  ${name.padEnd(11)} ${(margin * 100).toFixed(0)}%`);
+    }
+    lines.push("Re-run with --market=<type> [--legs=N] or --margin=<percent> for a verdict.");
+  } else {
+    lines.push("");
+    lines.push(`Market: ${assumption}`);
+    lines.push(`Fair odds needed: ${analysis.fairBoostOdds.toFixed(2)} (you have ${boostedOdds})`);
+    lines.push(`EV: ${signed(analysis.ev * 100, 1)}%  →  ${analysis.verdict}`);
+  }
+
+  out(lines.join("\n") + "\n");
+  return 0;
+}
+
 export async function runCli(argv, deps = {}) {
   const {
     out = (text) => process.stdout.write(text),
@@ -533,6 +599,9 @@ export async function runCli(argv, deps = {}) {
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
       });
     }
+    if (command === "boost") {
+      return runBoost(rest, { out, err });
+    }
     if (command === "evaluate") {
       const csvPath = rest[0];
       if (!csvPath) {
@@ -543,7 +612,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | evaluate <capture.csv>>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | evaluate <capture.csv>>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;
