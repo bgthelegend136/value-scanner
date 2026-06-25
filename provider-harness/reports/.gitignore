@@ -1,2 +1,4 @@
-# Generated capture worksheets and evaluation summaries are local artifacts.
-*.csv
+# Everything in reports/ is a local runtime artifact (capture worksheets,
+# evaluation summaries, funnel logs/CSVs, paper-bet ledgers, state files).
+*
+!.gitignore
