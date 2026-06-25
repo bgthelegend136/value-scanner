@@ -29,6 +29,8 @@ import { createTelegramClient } from "./telegram.mjs";
 import { createMispricingState } from "./mispricing_state.mjs";
 import { loadSportRegistry } from "./multisport_map.mjs";
 import { runMispricingScan } from "./mispricing_scan.mjs";
+import { matchCandidateEvent } from "./mispricing_match.mjs";
+import { confirmCandidate } from "./mispricing_confirm.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -563,6 +565,85 @@ function flag(rest, name) {
   return hit ? hit.split("=")[1] : undefined;
 }
 
+// Price a Stoiximan/Superbet "Ενισχυμένες Αποδόσεις" boost that the user is
+// looking at, against real de-vigged sharp odds — the same dual confirmation
+// (Pinnacle + 3-book consensus) the alert pipeline uses, instead of the assumed
+// market margin of the offline `boost` calculator. The user supplies the boost
+// (no scraping); we never gate or auto-bet, just report the true EV.
+async function runBoostCheck(rest, { loadTheOddsKey, createTheOddsClient, out, err, now }) {
+  const sportKey = flag(rest, "sport-key");
+  const home = flag(rest, "home");
+  const away = flag(rest, "away");
+  const date = flag(rest, "date");
+  const pick = flag(rest, "pick");
+  const boosted = Number(flag(rest, "boost"));
+  const baseFlag = flag(rest, "base");
+  const base = baseFlag != null ? Number(baseFlag) : undefined;
+
+  if (!sportKey || !home || !away || !date || !pick || !Number.isFinite(boosted) || boosted <= 1) {
+    err("usage: boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=ODDS [--base=ODDS]\n");
+    return 1;
+  }
+  const kickoff = new Date(date);
+  if (!Number.isFinite(kickoff.getTime())) {
+    err("boost-check: --date must be a valid ISO timestamp\n");
+    return 1;
+  }
+  const outcome = String(pick).toUpperCase();
+  if (!["1", "X", "2"].includes(outcome)) {
+    err("boost-check: --pick must be 1, X, or 2\n");
+    return 1;
+  }
+
+  // A boost is just a mispricing candidate the user supplies: feed it through the
+  // same confirmation so offeredOdds = the boosted price yields its true EV.
+  const candidate = {
+    sportSlug: sportKey.startsWith("soccer") ? "football" : "other",
+    leagueSlug: "",
+    kickoffUtc: kickoff.toISOString(),
+    participantOne: home,
+    participantTwo: away,
+    market: "MATCH_RESULT",
+    line: "",
+    outcome,
+    offeredOdds: boosted,
+  };
+
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  const header = `Boost check: ${home} vs ${away} — pick ${outcome} @ ${boosted}${base ? ` (was ${base})` : ""}`;
+
+  const events = await client.listEvents({ sportKey });
+  const match = matchCandidateEvent(candidate, events.data ?? []);
+  if (!match.event) {
+    out(`${header}\n`);
+    out(`The fixture could not be matched in the reference data (${match.reason}).\n`);
+    return 0;
+  }
+
+  const odds = await client.getOdds({
+    sportKey,
+    eventIds: [String(match.event.id)],
+    markets: "h2h",
+  });
+  const selections = normalizeTheOddsResponse(odds.data ?? [], odds.receivedAt);
+  const result = confirmCandidate(candidate, match.event, selections, { now: now() });
+  const quota = odds.quota?.remaining ?? "?";
+
+  out(`${header}\n`);
+  if (result.pinnacleEv === undefined) {
+    out(`Could not verify against sharp odds (${result.reason}).\n`);
+    out(`The Odds API quota remaining: ${quota}\n`);
+    return 0;
+  }
+
+  out(`Pinnacle fair odds: ${result.pinnacleFairOdds.toFixed(2)} (EV ${signed(result.pinnacleEv * 100, 1)}%)\n`);
+  out(`Consensus fair odds: ${result.consensusFairOdds.toFixed(2)} (EV ${signed(result.consensusEv * 100, 1)}%, ${result.consensusBooks} books)\n`);
+  const positive = result.pinnacleEv > 0 && result.consensusEv > 0;
+  out(`Verdict: ${positive ? "+EV — both sharp references agree" : "Not +EV"}\n`);
+  out(`The Odds API quota remaining: ${quota}\n`);
+  return 0;
+}
+
 // `boost` is pure arithmetic — no network, no keys, no quota.
 function runBoost(rest, { out, err }) {
   const baseOdds = Number(flag(rest, "base"));
@@ -682,6 +763,11 @@ export async function runCli(argv, deps = {}) {
     if (command === "boost") {
       return runBoost(rest, { out, err });
     }
+    if (command === "boost-check") {
+      return await runBoostCheck(rest, {
+        loadTheOddsKey, createTheOddsClient, out, err, now,
+      });
+    }
     if (command === "evaluate") {
       const csvPath = rest[0];
       if (!csvPath) {
@@ -727,7 +813,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

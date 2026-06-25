@@ -30,9 +30,10 @@ Detect **bookmaker pricing mistakes** (≈10–20% edges) on **Stoiximan** and *
 
 ## 2. Current state (what already works)
 
-- **All tests green:** `node --test` → **130/130** passing.
+- **All tests green:** `node --test` → **132/132** passing.
 - **2026-06-26 — P1 (CLV feedback loop) shipped** on this branch (see §6). Sent alerts are now snapshotted to `reports/mispricing-clv.csv`; the new `mispricing-clv` command captures the Pinnacle closing line and reports realized CLV. Live capture against The Odds API is not yet scheduled.
 - **2026-06-26 — P2 (two-tier cadence) shipped** (see §6). `runMispricingScan` now exits before any reference call on a no-op cycle (zero Pinnacle credits), and the production installer repeats every 15 minutes instead of 3×/day. Not yet registered on the machine.
+- **2026-06-26 — P6 (boost evaluation) shipped, partial** (see §6). New `boost-check` command prices a user-supplied Stoiximan/Superbet enhanced-odds (Ενισχυμένες Αποδόσεις) selection against real de-vigged Pinnacle + consensus odds, replacing the offline `boost` calculator's assumed margin. MATCH_RESULT single picks only so far; combos/totals pending.
 - **Live-verified end to end:**
   - `node src/cli.mjs telegram-test` → real message delivered to the owner's chat.
   - `node src/cli.mjs mispricing-scan --dry-run` → runs against both real APIs, fail-closed behavior confirmed (finds candidates, refuses to alert when confirmation data is absent).
@@ -59,6 +60,9 @@ node src/cli.mjs mispricing-scan
 
 # Capture closing-line value for already-sent alerts (run near/after kickoff)
 node src/cli.mjs mispricing-clv
+
+# Price a boost the user is looking at, against real sharp odds
+node src/cli.mjs boost-check --sport-key=soccer_fifa_world_cup --home="Japan" --away="Sweden" --date=2026-06-26T18:30:00Z --pick=1 --base=1.78 --boost=2.40
 
 # Verify Telegram delivery path
 node src/cli.mjs telegram-test
@@ -154,6 +158,21 @@ Each item lists the **why**, the **concrete change**, and **acceptance criteria*
 
 ---
 
+### P6 — Boost / enhanced-odds evaluation  ✅ **DONE (partial, 2026-06-26)**
+**Why:** Stoiximan/Superbet enhanced odds (Ενισχυμένες Αποδόσεις) are a prime source of mistakes and the owner's direct interest, but the offline `boost` calculator only guesses the market margin.
+**Delivered:** `cli.mjs` `boost-check` builds a synthetic MATCH_RESULT candidate from user-supplied boost details (no scraping — §0.2) and runs it through the real `confirmCandidate` dual confirmation, reporting Pinnacle & consensus fair odds + true EV + a verdict. Tests in `cli_boost_check.test.mjs` (+2).
+**Constraint reality:** fully *automatic* boost discovery is impossible without scraping the bookmaker site (forbidden). This is the supported model: the owner sees the boost, supplies it, the tool gives a rigorous verdict.
+**Still open:** combo/parlay boosts (price each leg, multiply), TOTALS/handicap boosts (needs P7), and a friendlier input than CLI flags (e.g. a guided prompt); optionally log boost verdicts for CLV like alerts.
+
+### P7 — Markets beyond 1X2 (TOTALS, handicaps, props)
+**Why:** Bookmaker mistakes are *more* common in softer markets (over/under, team totals, cards, corners, player props) than in the sharp 1X2 line — the current pipeline ignores all of them.
+**Change:** Extend normalize/confirm to TOTALS first (The Odds API already returns `totals`; `theodds_normalize.mjs` already maps OVER/UNDER). Resolve the over/under direction the provider feed encodes (the original reason TOTALS was deferred), then widen `expectedOutcomes`/de-vig grouping. Keep dual confirmation and the EV floor.
+**Acceptance:** a TOTALS candidate confirms against Pinnacle+consensus on the exact line; ambiguous/มismatched lines fail closed.
+
+### P8 — Live / in-play mistakes
+**Why:** The largest, most frequent mistakes happen in-play (laggy prices after a goal/card); the system is pre-match only.
+**Change:** Significant — needs a live odds source and a much faster loop. Scope and de-risk before building. Lowest priority until pre-match flow is proven to produce real, profitable alerts (watch the P1 CLV data first).
+
 ## 7. Working agreement (definition of done)
 
 - **TDD always:** write the failing test first, then the implementation. No new behavior without a test.
@@ -169,4 +188,4 @@ Each item lists the **why**, the **concrete change**, and **acceptance criteria*
 
 ## 8. First move for Codex
 
-P1 and P2 are done. Start with **P3 (second sharp source)** — it's the dead-end that keeps the confirmed-alert count at zero: the ≥10% mistakes land in leagues The Odds API doesn't carry. Read `src/mispricing_confirm.mjs` (the dual-confirmation gate) and `src/theodds_client.mjs`, then design an *alternative* sharp reference (e.g. Betfair Exchange fair price) that substitutes for Pinnacle when a fixture isn't covered — **without** lowering the EV floor or weakening dual confirmation (§0.1). Write the failing test first: a fixture absent from The Odds API but present in the second source can still confirm under the same floor; behavior is unchanged when both are present; fail-closed when neither is.
+P1, P2, and P6 (partial) are done. The highest-leverage remaining item is **P3 (second sharp source)** — it's the dead-end that keeps the confirmed-alert count at zero: the ≥10% mistakes land in leagues The Odds API doesn't carry. Read `src/mispricing_confirm.mjs` (the dual-confirmation gate) and `src/theodds_client.mjs`, then design an *alternative* sharp reference (e.g. Betfair Exchange fair price) that substitutes for Pinnacle when a fixture isn't covered — **without** lowering the EV floor or weakening dual confirmation (§0.1). Write the failing test first: a fixture absent from The Odds API but present in the second source can still confirm under the same floor; behavior is unchanged when both are present; fail-closed when neither is.
