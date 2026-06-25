@@ -23,12 +23,16 @@ import { loadSportRegistry, resolveSportKey } from "../src/multisport_map.mjs";
 import { normalizeValueBets } from "../src/mispricing_normalize.mjs";
 import { matchCandidateEvent } from "../src/mispricing_match.mjs";
 import { confirmCandidate } from "../src/mispricing_confirm.mjs";
+import { MIN_CANDIDATE_EV, MIN_CONFIRMED_EV } from "../src/mispricing_thresholds.mjs";
 import { normalizeTheOddsResponse } from "../src/theodds_normalize.mjs";
+
+const CAND_PCT = (MIN_CANDIDATE_EV * 100).toFixed(0);
+const CONF_PCT = (MIN_CONFIRMED_EV * 100).toFixed(0);
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const SPORT_MAP = resolve(HERE, "..", "config", "multisport-map.json");
 const DEFAULT_LOG = resolve(HERE, "..", "reports", "mispricing-funnel-log.csv");
-const BOOKMAKER = "Stoiximan";
+const BOOKMAKERS = ["Stoiximan", "Superbet"];
 
 const LOG_COLUMNS = [
   "ranAt", "bookmaker", "raw", "ml", "evMaxPct",
@@ -78,21 +82,32 @@ async function main() {
   const now = new Date();
 
   const metrics = {
-    ranAt: now.toISOString(), bookmaker: BOOKMAKER,
+    ranAt: now.toISOString(), bookmaker: BOOKMAKERS.join("+"),
     raw: 0, ml: 0, evMaxPct: "",
     evGte20: 0, ev10to20: 0, ev5to10: 0, ev0to5: 0, evNeg: 0,
     normalized: 0, mapped: 0, matched: 0, confirmable: 0, confirmed: 0,
     quotaRemaining: "",
   };
 
-  // Stage 1: candidates
-  const raw = await valueBets.getValueBets({ bookmaker: BOOKMAKER });
-  const rawList = Array.isArray(raw.data) ? raw.data : [];
+  // Stage 1: candidates (both books)
+  const rawList = [];
+  const candidates = [];
+  const rejected = [];
+  const perBook = [];
+  for (const bk of BOOKMAKERS) {
+    const r = await valueBets.getValueBets({ bookmaker: bk });
+    const list = Array.isArray(r.data) ? r.data : [];
+    rawList.push(...list);
+    const n = normalizeValueBets(list, { receivedAt: r.receivedAt, now });
+    candidates.push(...n.candidates);
+    rejected.push(...n.rejected);
+    perBook.push(`${bk}: ${list.length} raw -> ${n.candidates.length} candidate(s)`);
+  }
   metrics.raw = rawList.length;
-  const { candidates, rejected } = normalizeValueBets(rawList, { receivedAt: raw.receivedAt, now });
   metrics.normalized = candidates.length;
 
-  console.log(`\n# Mispricing funnel — ${now.toISOString()} (${BOOKMAKER})\n`);
+  console.log(`\n# Mispricing funnel — ${now.toISOString()} (${BOOKMAKERS.join(", ")})\n`);
+  console.log(`Per book: ${perBook.join("  |  ")}`);
   console.log(`Raw candidates from /value-bets: ${metrics.raw}`);
 
   // EV distribution of raw ML/Moneyline candidates — how close we get to +20%.
@@ -114,7 +129,7 @@ async function main() {
     console.log(`    >=20%: ${metrics.evGte20}   10-20%: ${metrics.ev10to20}   5-10%: ${metrics.ev5to10}   0-5%: ${metrics.ev0to5}   <0%: ${metrics.evNeg}`);
     console.log(`    top EVs: ${evFracs.slice(0, 5).map((v) => `${(v * 100).toFixed(1)}%`).join(", ")}`);
   }
-  console.log(`Normalized MATCH_RESULT candidates (EV>=20%, fresh, pre-match): ${candidates.length}`);
+  console.log(`Normalized MATCH_RESULT candidates (EV>=${CAND_PCT}%, fresh, pre-match): ${candidates.length}`);
   if (rejected.length) {
     console.log(`Rejected at normalize (${rejected.length}):`);
     for (const [reason, n] of tally(rejected, (r) => r.reason)) console.log(`    ${n}x  ${reason}`);
@@ -184,12 +199,12 @@ async function main() {
   }
 
   console.log(`\n# FUNNEL`);
-  console.log(`  raw                : ${metrics.raw}`);
-  console.log(`  normalized (>=20%) : ${metrics.normalized}`);
-  console.log(`  mapped             : ${metrics.mapped}`);
-  console.log(`  event-matched      : ${metrics.matched}`);
-  console.log(`  had Pinnacle+3books: ${metrics.confirmable}`);
-  console.log(`  CONFIRMED >20%     : ${metrics.confirmed}`);
+  console.log(`  raw                 : ${metrics.raw}`);
+  console.log(`  normalized (>=${CAND_PCT}%)   : ${metrics.normalized}`);
+  console.log(`  mapped              : ${metrics.mapped}`);
+  console.log(`  event-matched       : ${metrics.matched}`);
+  console.log(`  had Pinnacle+3books : ${metrics.confirmable}`);
+  console.log(`  CONFIRMED >${CONF_PCT}%       : ${metrics.confirmed}`);
   console.log(`The Odds API credits remaining: ${metrics.quotaRemaining || "? (none spent)"}`);
 
   if (appendPath) {

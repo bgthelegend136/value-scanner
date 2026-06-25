@@ -1,21 +1,25 @@
-// v1 scope: Stoiximan-only, MATCH_RESULT-only. See the plan's
-// "v1 Scope Decisions and Verified Schema" section for why totals/Superbet are
-// deferred and how the live /value-bets schema differs from the first draft.
+// Scope: Stoiximan + Superbet, MATCH_RESULT-only. The EV floor (see
+// mispricing_thresholds.mjs) is tuned to catch bookmaker *mistakes* (~10-20%
+// edges). Odds-API.io reports `expectedValue` as an index ~ (offered/fair)*100,
+// NOT a percentage, so the fraction is (value - 100)/100.
+// TOTALS stays deferred (undocumented over/under direction). Superbet candidates
+// resolve to superbet.bet.br (Brazil) — fine for detection, verify before betting.
+import { MIN_CANDIDATE_EV } from "./mispricing_thresholds.mjs";
 
 const MAX_AGE_MS = 10 * 60 * 1000;
 
-// Candidate EV must be at least +20% to be worth confirming. Odds-API.io reports
-// `expectedValue` as an index ~ (offeredOdds / fairOdds) * 100, NOT a percentage,
-// so the fraction is value/100 - 1.
-const MIN_CANDIDATE_EV = 0.2;
-
-const SUPPORTED_BOOKMAKERS = new Set(["Stoiximan"]);
+const SUPPORTED_BOOKMAKERS = new Set(["Stoiximan", "Superbet"]);
 const ALLOWED_HOSTS = {
   Stoiximan: new Set([
     "stoiximan.gr",
     "www.stoiximan.gr",
     "en.stoiximan.gr",
     "m.stoiximan.gr",
+  ]),
+  Superbet: new Set([
+    "superbet.gr",
+    "www.superbet.gr",
+    "superbet.bet.br",
   ]),
 };
 
@@ -125,7 +129,7 @@ export function normalizeValueBet(
   // at the 20% gate (120/100 - 1 === 0.19999999999999996, which would wrongly
   // reject an exactly-+20% candidate).
   const providerExpectedValue = expectedValue === null ? null : (expectedValue - 100) / 100;
-  if (!(providerExpectedValue >= MIN_CANDIDATE_EV)) return reject("CANDIDATE_EV_BELOW_20");
+  if (!(providerExpectedValue >= MIN_CANDIDATE_EV)) return reject("CANDIDATE_EV_BELOW_MIN");
 
   const valueUpdatedAt = new Date(raw.expectedValueUpdatedAt);
   if (!Number.isFinite(valueUpdatedAt.getTime())) return reject("INVALID_VALUE_TIMESTAMP");

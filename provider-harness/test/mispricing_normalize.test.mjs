@@ -48,11 +48,28 @@ test("normalizes a fresh ML candidate, fixes EV units, and drops totals in v1", 
   assert.equal(result.rejected[0].reason, "UNSUPPORTED_MARKET");
 });
 
-test("rejects below-20, stale, started, missing timestamp, malformed odds, and non-Stoiximan", () => {
+test("normalizes a Superbet candidate and keeps its allowlisted .bet.br link", () => {
+  const superbet = {
+    ...fixture[0],
+    id: "sb-1",
+    bookmaker: "Superbet",
+    bookmakerOdds: { ...fixture[0].bookmakerOdds, href: "https://superbet.bet.br/event/1" },
+  };
+  const result = normalizeValueBets([superbet], {
+    receivedAt: "2026-06-25T08:56:00.000Z",
+    now: new Date("2026-06-25T09:00:00.000Z"),
+  });
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].bookmaker, "Superbet");
+  assert.equal(result.candidates[0].link, "https://superbet.bet.br/event/1");
+  assert.equal(result.candidates[0].linkDepth, "EVENT");
+});
+
+test("rejects below-min EV, stale, started, missing timestamp, malformed odds, and unsupported book", () => {
   const base = fixture[0];
   const mutations = [
-    // 119.9/100 - 1 = 0.199 < 0.20
-    [{ ...base, expectedValue: 119.9 }, "CANDIDATE_EV_BELOW_20"],
+    // (109.9 - 100)/100 = 0.099 < 0.10 floor
+    [{ ...base, expectedValue: 109.9 }, "CANDIDATE_EV_BELOW_MIN"],
     [{ ...base, expectedValueUpdatedAt: "2026-06-25T08:40:00Z" }, "STALE_CANDIDATE"],
     [{ ...base, expectedValueUpdatedAt: "" }, "INVALID_VALUE_TIMESTAMP"],
     [{ ...base, event: { ...base.event, date: "2026-06-25T08:59:00Z" } }, "EVENT_STARTED"],
@@ -61,7 +78,7 @@ test("rejects below-20, stale, started, missing timestamp, malformed odds, and n
       bookmakerOdds: { ...base.bookmakerOdds, home: "not-a-number" },
       market: { ...base.market, home: "not-a-number" },
     }, "INVALID_OFFERED_ODDS"],
-    [{ ...base, bookmaker: "Superbet" }, "UNSUPPORTED_BOOKMAKER"],
+    [{ ...base, bookmaker: "Bet365" }, "UNSUPPORTED_BOOKMAKER"],
   ];
 
   for (const [raw, reason] of mutations) {
@@ -74,13 +91,13 @@ test("rejects below-20, stale, started, missing timestamp, malformed odds, and n
   }
 });
 
-test("EV prefilter is inclusive at exactly 20 percent", () => {
-  const result = normalizeValueBets([{ ...fixture[0], expectedValue: 120 }], {
+test("EV prefilter is inclusive at exactly the 10 percent floor", () => {
+  const result = normalizeValueBets([{ ...fixture[0], expectedValue: 110 }], {
     receivedAt: "2026-06-25T09:00:00Z",
     now: new Date("2026-06-25T09:00:00Z"),
   });
   assert.equal(result.candidates.length, 1);
-  assert.equal(result.candidates[0].providerExpectedValue, 0.2);
+  assert.equal(result.candidates[0].providerExpectedValue, 0.1);
 });
 
 test("uses only allowlisted HTTPS Stoiximan links and falls back by depth", () => {

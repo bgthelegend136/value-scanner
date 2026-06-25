@@ -35,7 +35,8 @@ A live `/value-bets` capture on 2026-06-25 (76 real Stoiximan/Superbet candidate
 
 ### Scope (v1)
 
-- **Bookmaker: Stoiximan only.** `BOOKMAKERS = ["Stoiximan"]`. Drop Superbet from v1: the account's Superbet candidates link to `superbet.bet.br` (Brazil), a different market from Greek Superbet, so its odds/availability are not actionable here. Superbet returns only after a Greek Superbet source is confirmed. Remove Superbet from the bookmaker allowlist, the normalizer's accepted-bookmaker set, and the Task 8 `BOOKMAKERS` constant. (Task 1's client takes `bookmaker` as a parameter and is unchanged.)
+- **EV floor: 10%, not 20% — this is a bookmaker-*mistake* detector.** The target is Stoiximan/Superbet pricing errors, which surface as ~10-20% edges (a 20%+ floor produced zero live candidates). Both the candidate prefilter and the strict confirmation gate live in `src/mispricing_thresholds.mjs` (`MIN_CANDIDATE_EV` / `MIN_CONFIRMED_EV`, both `0.1`) and are meant to be tuned. The reject reasons are `CANDIDATE_EV_BELOW_MIN` / `PINNACLE_EV_BELOW_MIN` / `CONSENSUS_EV_BELOW_MIN`.
+- **Bookmakers: Stoiximan + Superbet.** `BOOKMAKERS = ["Stoiximan", "Superbet"]`. Superbet is in scope for *detection*, but its candidates resolve to `superbet.bet.br` (Brazil) — allowlisted so links survive, but the market must be verified before betting since it may differ from Greek Superbet. (Task 1's client takes `bookmaker` as a parameter and is unchanged.)
 - **Market: MATCH_RESULT only.** Drop TOTALS from v1: the provider encodes totals as `betSide` `home`/`away` with the line in `hdp`, and the Over/Under direction is undocumented — a wrong guess is a confidently wrong bet. Supported markets = `MATCH_RESULT` only. Remove the TOTALS branch from `marketShape`, `selectionValue`, `selectionLink` (Task 2) and from `expectedOutcomes` (Task 5). Totals returns in v2 once the home/away→Over/Under direction is verified against The Odds API's explicit `over`/`under` outcomes.
 
 ### Verified candidate schema (real shape)
@@ -58,11 +59,7 @@ A real MATCH_RESULT candidate:
 
 Corrections vs. the task fixtures:
 
-1. **EV units.** `expectedValue` is an index ≈ `(offeredOdds / fairOdds) × 100`, **not** a percentage. Therefore:
-   - candidate EV fraction = `expectedValue / 100 - 1`;
-   - the ">20% candidate" prefilter is `expectedValue / 100 - 1 >= 0.20` (i.e. `expectedValue >= 120`);
-   - `providerExpectedValue = expectedValue / 100 - 1`.
-   Replace the plan's `finite(raw.expectedValue) >= 20` gate and `Number(raw.expectedValue) / 100` field accordingly. Fixture EVs must be ≥ 120 to represent a passing candidate (e.g. `124.5`); the `CANDIDATE_EV_BELOW_20` case uses e.g. `119.9`. (Market name `"ML"` and `"Moneyline"` both map to MATCH_RESULT; `betSide` is `home`/`away`/`draw`.)
+1. **EV units.** `expectedValue` is an index ≈ `(offeredOdds / fairOdds) × 100`, **not** a percentage. Use the float-stable form `providerExpectedValue = (expectedValue - 100) / 100` (the `value/100 - 1` form is fragile right at the gate). The candidate prefilter is `providerExpectedValue >= MIN_CANDIDATE_EV` (0.1 → `expectedValue >= 110`). Replace the plan's `finite(raw.expectedValue) >= 20` gate and `Number(raw.expectedValue) / 100` field accordingly. A passing fixture EV is e.g. `124.5`; the `CANDIDATE_EV_BELOW_MIN` case uses e.g. `109.9`. (Market name `"ML"` and `"Moneyline"` both map to MATCH_RESULT; `betSide` is `home`/`away`/`draw`.)
 2. **`event.sport` / `event.league` are plain strings** (e.g. `"Basketball"`, `"Argentina - Primera Division A, Women, Apertura"`), not `{name, slug}` objects. The normalizer's `slug()`/`text()` already accept strings; fixtures must use strings. Expect very granular league slugs, so the registry stays sparse and grows from real `UNMAPPED_SPORT_LEAGUE` audit rows.
 3. **Link allowlist hosts.** Real Stoiximan links use `en.stoiximan.gr`. Allowlist must be `Stoiximan: ["stoiximan.gr", "www.stoiximan.gr", "en.stoiximan.gr", "m.stoiximan.gr"]`. Only the event-level `bookmakerOdds.href` is present — outcome/market deep links are absent — so the inline button is always EVENT depth and the message keeps the "find the exact pick" note.
 4. **MATCH_RESULT extraction** (already matches the plan): `betSide` home→`"1"`, draw→`"X"`, away→`"2"`; offered odds from `bookmakerOdds.home/draw/away`; per-book reference fair side from `market.home/draw/away`. Only the totals branch is removed.

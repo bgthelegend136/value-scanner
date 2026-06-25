@@ -1,4 +1,5 @@
 import { selectionKey } from "./mispricing_match.mjs";
+import { MIN_CONFIRMED_EV } from "./mispricing_thresholds.mjs";
 import { devigPower } from "./value.mjs";
 
 const MAX_AGE_MS = 10 * 60 * 1000;
@@ -100,11 +101,11 @@ export function confirmCandidate(
     consensusBooks: probabilities.length,
     minimumConfirmedEv: Math.min(pinnacleEv, consensusEv),
   };
-  if (!(pinnacleEv > 0.2)) {
-    return { ...base, status: "REJECTED", reason: "PINNACLE_EV_NOT_ABOVE_20" };
+  if (!(pinnacleEv > MIN_CONFIRMED_EV)) {
+    return { ...base, status: "REJECTED", reason: "PINNACLE_EV_BELOW_MIN" };
   }
-  if (!(consensusEv > 0.2)) {
-    return { ...base, status: "REJECTED", reason: "CONSENSUS_EV_NOT_ABOVE_20" };
+  if (!(consensusEv > MIN_CONFIRMED_EV)) {
+    return { ...base, status: "REJECTED", reason: "CONSENSUS_EV_BELOW_MIN" };
   }
   return { ...base, status: "CONFIRMED", reason: "" };
 }

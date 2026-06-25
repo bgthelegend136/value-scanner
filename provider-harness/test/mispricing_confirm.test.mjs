@@ -38,7 +38,7 @@ test("median handles odd and even samples", () => {
   assert.equal(median([0.4, 0.5, 0.6, 0.7]), 0.55);
 });
 
-test("confirms only when both Pinnacle and 3-book median exceed strict 20%", () => {
+test("confirms when both Pinnacle and the 3-book median clear the EV floor", () => {
   const rows = [
     ...market3("pinnacle", 1.5, 4.2, 6.5),
     ...market3("betsson", 1.52, 4.1, 6.3),
@@ -47,14 +47,14 @@ test("confirms only when both Pinnacle and 3-book median exceed strict 20%", () 
   ];
   const result = confirmCandidate(footballHome, referenceEvent, rows, { now });
   assert.equal(result.status, "CONFIRMED");
-  assert.ok(result.pinnacleEv > 0.2);
-  assert.ok(result.consensusEv > 0.2);
+  assert.ok(result.pinnacleEv > 0.1);
+  assert.ok(result.consensusEv > 0.1);
   assert.equal(result.consensusBooks, 3);
   assert.equal(result.minimumConfirmedEv, Math.min(result.pinnacleEv, result.consensusEv));
 });
 
-test("exactly 20 percent fails the strict boundary (two-way market)", () => {
-  const twoWayHome = { ...footballHome, sportSlug: "basketball", offeredOdds: 2.4 };
+test("an EV just below the 10 percent floor is rejected", () => {
+  const twoWayHome = { ...footballHome, sportSlug: "basketball", offeredOdds: 2.18 };
   const result = confirmCandidate(
     twoWayHome,
     referenceEvent,
@@ -66,9 +66,10 @@ test("exactly 20 percent fails the strict boundary (two-way market)", () => {
     ],
     { now },
   );
-  assert.ok(Math.abs(result.pinnacleEv - 0.2) < 1e-9);
-  assert.ok(Math.abs(result.consensusEv - 0.2) < 1e-9);
+  // fair ~0.5 each -> EV ~ 2.18 * 0.5 - 1 = 0.09
+  assert.ok(result.pinnacleEv < 0.1);
   assert.notEqual(result.status, "CONFIRMED");
+  assert.equal(result.reason, "PINNACLE_EV_BELOW_MIN");
 });
 
 test("rejects fewer than three consensus books, stale Pinnacle, and missing Pinnacle", () => {
