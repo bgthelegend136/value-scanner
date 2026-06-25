@@ -102,6 +102,19 @@ export async function runMispricingScan({
   }
 
   summary.candidates = discovered.length;
+
+  // Detection tier: when nothing fresh clears the EV floor and no earlier
+  // candidate is still queued, there is nothing to confirm. Exit before touching
+  // The Odds API at all, so the frequent (e.g. 15-min) cadence spends zero
+  // reference credits on the common no-op cycle and only the confirmation tier
+  // ever calls listSports/listEvents/getOdds.
+  if (discovered.length === 0 && existingQueue.length === 0) {
+    await state.writeQueue([]);
+    await state.writeHealth(health);
+    out(`${JSON.stringify(summary)}\n`);
+    return summary;
+  }
+
   let sportsResponse;
   try {
     sportsResponse = await referenceClient.listSports();

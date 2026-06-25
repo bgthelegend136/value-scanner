@@ -44,11 +44,14 @@ $Action = New-ScheduledTaskAction `
   -Execute $PowerShell `
   -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Runner`""
 
-$Triggers = @(
-  New-ScheduledTaskTrigger -Daily -At '09:00'
-  New-ScheduledTaskTrigger -Daily -At '15:00'
-  New-ScheduledTaskTrigger -Daily -At '21:00'
-)
+# Repeat every 15 minutes, indefinitely (3650-day duration avoids the
+# [TimeSpan]::MaxValue bug in New-ScheduledTaskTrigger). The detection tier is
+# cheap -- a no-op cycle spends zero Pinnacle credits; only a fresh >=10%
+# candidate escalates to confirmation. -StartWhenAvailable backfills runs missed
+# while the machine was asleep.
+$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
+  -RepetitionInterval (New-TimeSpan -Minutes 15) `
+  -RepetitionDuration (New-TimeSpan -Days 3650)
 
 $Settings = New-ScheduledTaskSettingsSet `
   -StartWhenAvailable `
@@ -64,7 +67,7 @@ $Principal = New-ScheduledTaskPrincipal `
 Register-ScheduledTask `
   -TaskName $TaskName `
   -Action $Action `
-  -Trigger $Triggers `
+  -Trigger $Trigger `
   -Settings $Settings `
   -Principal $Principal `
   -Description 'Sends independently confirmed Stoiximan/Superbet mispricing alerts to Telegram.' `

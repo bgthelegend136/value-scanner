@@ -30,13 +30,14 @@ Detect **bookmaker pricing mistakes** (≈10–20% edges) on **Stoiximan** and *
 
 ## 2. Current state (what already works)
 
-- **All tests green:** `node --test` → **129/129** passing.
+- **All tests green:** `node --test` → **130/130** passing.
 - **2026-06-26 — P1 (CLV feedback loop) shipped** on this branch (see §6). Sent alerts are now snapshotted to `reports/mispricing-clv.csv`; the new `mispricing-clv` command captures the Pinnacle closing line and reports realized CLV. Live capture against The Odds API is not yet scheduled.
+- **2026-06-26 — P2 (two-tier cadence) shipped** (see §6). `runMispricingScan` now exits before any reference call on a no-op cycle (zero Pinnacle credits), and the production installer repeats every 15 minutes instead of 3×/day. Not yet registered on the machine.
 - **Live-verified end to end:**
   - `node src/cli.mjs telegram-test` → real message delivered to the owner's chat.
   - `node src/cli.mjs mispricing-scan --dry-run` → runs against both real APIs, fail-closed behavior confirmed (finds candidates, refuses to alert when confirmation data is absent).
 - **Latest live funnel (2026-06-26):** 95 raw candidates → distribution `≥20%: 0 | 10–20%: 1 | 5–10%: 10 | 0–5%: 66`. The single 10–20% candidate was correctly dropped as `STALE_CANDIDATE`. Net: 0 confirmed, 0 sent. The pipeline is behaving correctly; opportunities are simply rare/fleeting.
-- **Schedulers:** installer scripts exist (`scripts/install-mispricing-task.ps1` for the 3×/day production scanner; `scripts/install-mispricing-funnel-task.ps1` for the read-only sampler). The production scanner has **not** been registered on the machine yet — that is the owner's call.
+- **Schedulers:** installer scripts exist (`scripts/install-mispricing-task.ps1` for the every-15-min production scanner; `scripts/install-mispricing-funnel-task.ps1` for the read-only sampler). The production scanner has **not** been registered on the machine yet — that is the owner's call.
 
 The working tree on this branch is clean and committed. Do not revert existing files unless explicitly asked.
 
@@ -129,10 +130,12 @@ Each item lists the **why**, the **concrete change**, and **acceptance criteria*
 - Tests: `mispricing_state.test.mjs` (+2), `cli_mispricing_clv.test.mjs` (+2), plus CLV assertions added to `mispricing_scan.test.mjs`. Suite 129/129.
 **Still open (small follow-ups, not blocking):** schedule `mispricing-clv` to run near kickoff (own PS task or fold into the runner); optionally also measure CLV against the consensus (not just Pinnacle).
 
-### P2 — Fix the cadence/latency mismatch  *(the real reason live mistakes are missed)*
-**Why:** Mistakes live for *minutes*; the production scanner runs **3×/day**. A 10:00 mistake is gone by the 15:00 run. Verified live: the only 10–20% candidate today was already stale.
-**Change:** Two-tier polling. A cheap **detection** pass (Odds-API.io only, **zero** The Odds API credits) every ~10–15 min that just checks whether any candidate clears the 10% floor and is fresh. Only when it finds one does it trigger the **expensive** confirmation path (spend a credit, run dual confirmation, alert). Keep the quota reserve guard. Add a scheduler trigger for the detection tier.
-**Acceptance:** Detection pass provably spends 0 reference credits when nothing qualifies (assert via injected reference client that `getOdds` is never called). Confirmation only fires on a fresh ≥10% candidate. Quota reserve still honored.
+### P2 — Fix the cadence/latency mismatch  ✅ **DONE (2026-06-26)**
+**Delivered on this branch.** The scan is self-escalating, so detection and confirmation live in one process:
+- `mispricing_scan.mjs` — after normalization, when `discovered.length === 0 && existingQueue.length === 0` the run writes empty queue + health and returns **before** calling `listSports`/`listEvents`/`getOdds`. So a no-op 15-min cycle spends zero reference credits; only a fresh ≥10% candidate (or a still-queued one) reaches confirmation. The existing quota-reserve guard is unchanged.
+- `scripts/install-mispricing-task.ps1` — replaced the three daily `-At` triggers with a single `-Once` trigger repeating every 15 min (`New-TimeSpan -Minutes 15`, 3650-day duration to dodge the `[TimeSpan]::MaxValue` bug). `MultipleInstances IgnoreNew` already prevents overlap. Parse-verified; not yet registered.
+- Tests: `mispricing_scan.test.mjs` (+1, asserts a no-op cycle never calls any reference method) and `scheduler_scripts.test.mjs` (updated to assert the 15-min repetition). Suite 130/130.
+**Note:** detection cost is the Odds-API.io `/value-bets` calls (2/cycle ≈ 192/day) — the *cheap* feed; the early-exit is specifically about not spending Pinnacle/The-Odds-API credits on empty cycles.
 
 ### P3 — Widen confirmation coverage (second sharp source)
 **Why:** Today confirmation depends 100% on The Odds API carrying the same league. The ≥10% mistakes keep landing in obscure leagues (e.g. Australian women's NPL) that it doesn't cover → 0 confirmable alerts. Single point of failure on coverage.
@@ -166,4 +169,4 @@ Each item lists the **why**, the **concrete change**, and **acceptance criteria*
 
 ## 8. First move for Codex
 
-P1 is done. Start with **P2 (two-tier cadence)** — it's the real reason live mistakes are missed today. Read `src/mispricing_scan.mjs` (the current single-pass orchestrator) and `scripts/install-mispricing-task.ps1`, then write the failing test asserting the cheap detection pass spends **zero** reference credits when nothing clears the 10% floor (inject a reference client whose `getOdds` throws if called), before touching implementation. Keep the quota-reserve guard and all §0 constraints intact.
+P1 and P2 are done. Start with **P3 (second sharp source)** — it's the dead-end that keeps the confirmed-alert count at zero: the ≥10% mistakes land in leagues The Odds API doesn't carry. Read `src/mispricing_confirm.mjs` (the dual-confirmation gate) and `src/theodds_client.mjs`, then design an *alternative* sharp reference (e.g. Betfair Exchange fair price) that substitutes for Pinnacle when a fixture isn't covered — **without** lowering the EV floor or weakening dual confirmation (§0.1). Write the failing test first: a fixture absent from The Odds API but present in the second source can still confirm under the same floor; behavior is unchanged when both are present; fail-closed when neither is.

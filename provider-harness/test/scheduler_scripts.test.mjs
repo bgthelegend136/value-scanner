@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("production installer registers three daily triggers and prevents overlapping runs", async () => {
+test("production installer repeats every 15 minutes and prevents overlapping runs", async () => {
   const source = await readFile(
     new URL("../scripts/install-mispricing-task.ps1", import.meta.url),
     "utf8",
   );
 
-  for (const time of ["09:00", "15:00", "21:00"]) {
-    assert.match(source, new RegExp(`-At '${time}'`));
-  }
-  assert.doesNotMatch(source, /-At '13:00'|-At '17:00'/);
+  // Two-tier cadence: a frequent cheap detection pass, escalating only on a
+  // fresh >=10% candidate (see runMispricingScan detection tier).
+  assert.match(source, /-RepetitionInterval/);
+  assert.match(source, /New-TimeSpan -Minutes 15/);
+  assert.match(source, /-Once\b/);
+  assert.doesNotMatch(source, /-At '09:00'|-At '15:00'|-At '21:00'/);
   assert.match(source, /Bet-Mispricing-Scanner/);
   assert.match(source, /MultipleInstances IgnoreNew/);
   assert.match(source, /-StartWhenAvailable\b(?!\s+\$)/);

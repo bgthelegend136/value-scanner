@@ -116,6 +116,25 @@ test("dry run verifies but sends nothing and records no delivered alert", async 
   assert.deepEqual(await state.readClvLedger(), []);
 });
 
+test("detection tier spends zero reference calls when nothing qualifies and the queue is empty", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-detect-noop-"));
+  const state = createMispricingState({ reportsDir });
+  const d = deps({ reportsDir, state });
+  // No raw candidate clears the 10% floor this cycle.
+  d.valueBetsClient.getValueBets = async () => ({ data: [], receivedAt: now.toISOString(), rateLimit: {} });
+  // The cheap detection pass must not touch The Odds API at all.
+  d.referenceClient.listSports = async () => { throw new Error("listSports must not be called"); };
+  d.referenceClient.listEvents = async () => { throw new Error("listEvents must not be called"); };
+  d.referenceClient.getOdds = async () => { throw new Error("getOdds must not be called"); };
+
+  const summary = await runMispricingScan(d);
+
+  assert.equal(summary.candidates, 0);
+  assert.equal(summary.verifiedSports, 0);
+  assert.equal(summary.sent, 0);
+  assert.equal((await state.readQueue()).length, 0);
+});
+
 test("reference failure sends nothing and keeps candidates queued", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-ref-fail-"));
   const state = createMispricingState({ reportsDir });
