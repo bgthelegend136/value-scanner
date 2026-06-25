@@ -19,7 +19,7 @@ $Triggers = @(
 )
 
 $Settings = New-ScheduledTaskSettingsSet `
-  -StartWhenAvailable $true `
+  -StartWhenAvailable `
   -MultipleInstances IgnoreNew `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
 

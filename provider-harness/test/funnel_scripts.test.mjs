@@ -12,7 +12,8 @@ test("installer registers the funnel task with four daily local-time triggers", 
   }
   assert.match(source, /Bet-Mispricing-Funnel/);
   assert.match(source, /MultipleInstances IgnoreNew/);
-  assert.match(source, /StartWhenAvailable \$true/);
+  // -StartWhenAvailable is a switch in Windows PowerShell 5.1: bare, no $true.
+  assert.match(source, /-StartWhenAvailable\b(?!\s+\$)/);
   assert.match(source, /Register-ScheduledTask/);
 });
 
