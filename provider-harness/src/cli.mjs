@@ -507,6 +507,57 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
   return 0;
 }
 
+// Capture closing-line value for sent mispricing alerts. Reuses the same Pinnacle
+// de-vig + applyClosingLine/summarizeClv machinery as paper-bet CLV, but reads the
+// mispricing alert ledger and queries each sport once, limited to tracked events.
+async function runMispricingClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, now }) {
+  const state = createMispricingState({ reportsDir });
+  const rows = await state.readClvLedger();
+  const pending = rows.filter((row) => row.status === "PENDING");
+  if (pending.length === 0) {
+    out("No pending mispricing alerts for CLV capture.\n");
+    return 0;
+  }
+
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  const eventsBySport = new Map();
+  for (const row of pending) {
+    if (!eventsBySport.has(row.sportKey)) eventsBySport.set(row.sportKey, new Set());
+    eventsBySport.get(row.sportKey).add(row.referenceEventId);
+  }
+
+  const closing = new Map();
+  let quotaRemaining;
+  for (const [sportKey, eventIdSet] of eventsBySport) {
+    const response = await client.getOdds({
+      sportKey,
+      eventIds: [...eventIdSet],
+      markets: "h2h",
+    });
+    quotaRemaining = response.quota?.remaining ?? quotaRemaining;
+    for (const [key, probability] of closingFairByKey(response.data ?? [], response.receivedAt)) {
+      closing.set(key, probability);
+    }
+  }
+
+  const updated = applyClosingLine(rows, closing, { capturedAt: now().toISOString() });
+  await state.writeClvLedger(updated);
+
+  const summary = summarizeClv(updated);
+  const beatRate = summary.beatRate === null ? "N/A" : `${(summary.beatRate * 100).toFixed(1)}%`;
+  const averageClv = summary.averageClv === null ? "N/A" : `${signed(summary.averageClv * 100, 1)}%`;
+  out(
+    [
+      `Mispricing CLV captured: ${summary.captured}`,
+      `Positive CLV (beat the close): ${summary.positive}`,
+      `Beat rate: ${beatRate}`,
+      `Average CLV: ${averageClv}`,
+    ].join("\n") + "\n",
+  );
+  out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
+  return 0;
+}
+
 function flag(rest, name) {
   const hit = rest.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.split("=")[1] : undefined;
@@ -623,6 +674,11 @@ export async function runCli(argv, deps = {}) {
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
       });
     }
+    if (command === "mispricing-clv") {
+      return await runMispricingClv({
+        loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+      });
+    }
     if (command === "boost") {
       return runBoost(rest, { out, err });
     }
@@ -671,7 +727,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | evaluate <capture.csv> | mispricing-scan [--dry-run] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

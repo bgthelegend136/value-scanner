@@ -30,7 +30,8 @@ Detect **bookmaker pricing mistakes** (≈10–20% edges) on **Stoiximan** and *
 
 ## 2. Current state (what already works)
 
-- **All tests green:** `node --test` → **125/125** passing.
+- **All tests green:** `node --test` → **129/129** passing.
+- **2026-06-26 — P1 (CLV feedback loop) shipped** on this branch (see §6). Sent alerts are now snapshotted to `reports/mispricing-clv.csv`; the new `mispricing-clv` command captures the Pinnacle closing line and reports realized CLV. Live capture against The Odds API is not yet scheduled.
 - **Live-verified end to end:**
   - `node src/cli.mjs telegram-test` → real message delivered to the owner's chat.
   - `node src/cli.mjs mispricing-scan --dry-run` → runs against both real APIs, fail-closed behavior confirmed (finds candidates, refuses to alert when confirmation data is absent).
@@ -54,6 +55,9 @@ node src/cli.mjs mispricing-scan --dry-run
 
 # Live scan (will send Telegram alerts if anything confirms)
 node src/cli.mjs mispricing-scan
+
+# Capture closing-line value for already-sent alerts (run near/after kickoff)
+node src/cli.mjs mispricing-clv
 
 # Verify Telegram delivery path
 node src/cli.mjs telegram-test
@@ -97,7 +101,7 @@ Odds-API.io /value-bets ──► normalize ──► map sport ──► match 
 | CLI | `src/cli.mjs` | Command dispatch: `mispricing-scan`, `telegram-test`, plus existing `clv`, `settle`, `boost`, etc. |
 | Schedulers | `scripts/*.ps1` | Production scanner (09:00/15:00/21:00) + funnel sampler. |
 
-State/artifacts are written under `reports/` (gitignored): `mispricing-audit.csv`, `mispricing-queue.csv`, `mispricing-alerts.csv`, `mispricing-health.json`.
+State/artifacts are written under `reports/` (gitignored): `mispricing-audit.csv`, `mispricing-queue.csv`, `mispricing-alerts.csv`, `mispricing-clv.csv`, `mispricing-health.json`.
 
 ---
 
@@ -117,11 +121,13 @@ State/artifacts are written under `reports/` (gitignored): `mispricing-audit.csv
 
 Each item lists the **why**, the **concrete change**, and **acceptance criteria**. Follow TDD: red test → green → refactor. Keep `node --test` at 100%.
 
-### P1 — Wire a feedback loop: CLV on every sent alert  *(highest value, mostly wiring)*
-**Why:** The system sends alerts and forgets them. Without recording whether each alert beat the closing line, you can never prove the alerts are real edge vs. noise.
-**What exists:** A full CLV domain already lives in `src/paper.mjs`: `applyClosingLine(rows, closingFairByKey, {capturedAt})`, `summarizeClv(rows)`, and the `clv` CLI command (`runClv` in `cli.mjs:477`). It currently operates on *paper bets*, not on mispricing alerts.
-**Change:** When `mispricing_scan` sends an alert, also record it as a trackable bet (reuse the `paper.mjs` row shape: store offered odds, kickoff, the de-vigged fair probability at send time, and a stable key). Then extend/point the existing closing-line capture to compute CLV for these alert rows near kickoff, and surface `summarizeClv` output (captured / positive / average CLV).
-**Acceptance:** A sent alert produces a tracked row; a later close-capture run fills `closingFairOdds`, `clv`, `clvCapturedAt`; `summarizeClv` reports aggregate CLV. New tests cover the send→track→capture→summarize path. Secrets never written to the CSV.
+### P1 — Wire a feedback loop: CLV on every sent alert  ✅ **DONE (2026-06-26)**
+**Delivered on this branch.** Implementation summary so it isn't redone:
+- `mispricing_state.mjs` — new `CLV_LEDGER_COLUMNS`, `buildClvTrackingRow(candidate, confirmation, {sentAt})`, `mergeClvLedger(existing, incoming)` (dedup by alert identity), and `readClvLedger()` / `writeClvLedger()` over `reports/mispricing-clv.csv`.
+- `mispricing_scan.mjs` — on a successful send (not dry-run, not on Telegram failure) it appends a PENDING tracking row carrying `decimalOdds = offeredOdds`, `referenceEventId`, sport/market/line/outcome, kickoff, and the opening Pinnacle fair probability.
+- `cli.mjs` — new `mispricing-clv` command (`runMispricingClv`): groups PENDING alerts by sport, queries The Odds API once per sport (`markets=h2h`, limited to tracked `eventIds`), de-vigs Pinnacle, then reuses `applyClosingLine`/`summarizeClv` from `paper.mjs` and prints captured / positive / beat-rate / average CLV.
+- Tests: `mispricing_state.test.mjs` (+2), `cli_mispricing_clv.test.mjs` (+2), plus CLV assertions added to `mispricing_scan.test.mjs`. Suite 129/129.
+**Still open (small follow-ups, not blocking):** schedule `mispricing-clv` to run near kickoff (own PS task or fold into the runner); optionally also measure CLV against the consensus (not just Pinnacle).
 
 ### P2 — Fix the cadence/latency mismatch  *(the real reason live mistakes are missed)*
 **Why:** Mistakes live for *minutes*; the production scanner runs **3×/day**. A 10:00 mistake is gone by the 15:00 run. Verified live: the only 10–20% candidate today was already stale.
@@ -160,4 +166,4 @@ Each item lists the **why**, the **concrete change**, and **acceptance criteria*
 
 ## 8. First move for Codex
 
-Start with **P1 (CLV wiring)** — it's the shortest path to *data about whether this system actually has edge*, and most of the machinery (`paper.mjs` CLV functions) already exists. Read `src/paper.mjs`, `src/cli.mjs:477` (`runClv`), and `src/mispricing_scan.mjs` (the send path), then write the failing test for "a sent alert becomes a CLV-trackable row" before touching implementation.
+P1 is done. Start with **P2 (two-tier cadence)** — it's the real reason live mistakes are missed today. Read `src/mispricing_scan.mjs` (the current single-pass orchestrator) and `scripts/install-mispricing-task.ps1`, then write the failing test asserting the cheap detection pass spends **zero** reference credits when nothing clears the 10% floor (inject a reference client whose `getOdds` throws if called), before touching implementation. Keep the quota-reserve guard and all §0 constraints intact.

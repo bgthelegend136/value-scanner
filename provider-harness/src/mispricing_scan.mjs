@@ -3,7 +3,9 @@ import { resolveSportKey } from "./multisport_map.mjs";
 import { matchCandidateEvent } from "./mispricing_match.mjs";
 import { confirmCandidate } from "./mispricing_confirm.mjs";
 import {
+  buildClvTrackingRow,
   candidateIdentity,
+  mergeClvLedger,
   mergeQueue,
   selectSportGroups,
   shouldSendAlert,
@@ -60,8 +62,10 @@ export async function runMispricingScan({
   };
   const audit = await state.readAudit();
   const existingQueue = await state.readQueue();
+  const existingClv = await state.readClvLedger();
   const health = await state.readHealth();
   const discovered = [];
+  const clvTracked = [];
 
   for (const row of existingQueue) {
     if (new Date(row.kickoffUtc).getTime() <= now.getTime()) {
@@ -222,6 +226,7 @@ export async function runMispricingScan({
             telegramMessageId: telegram.messageId,
           });
           deliveredByIdentity.set(identity, delivered.at(-1));
+          clvTracked.push(buildClvTrackingRow(candidate, confirmation, { sentAt: now.toISOString() }));
           summary.sent += 1;
           health.telegramFailures = 0;
         } catch {
@@ -258,6 +263,7 @@ export async function runMispricingScan({
 
   await state.writeQueue(mergeQueue([], remainingQueue, { now }));
   await state.writeAlerts(delivered);
+  await state.writeClvLedger(mergeClvLedger(existingClv, clvTracked));
   await state.writeAudit(audit);
   await state.writeHealth(health);
   out(`${JSON.stringify(summary)}\n`);

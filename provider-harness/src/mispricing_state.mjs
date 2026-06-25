@@ -20,6 +20,16 @@ export const AUDIT_COLUMNS = [
   "market", "line", "outcome", "status", "reason",
   "pinnacleEv", "consensusEv", "consensusBooks",
 ];
+// One row per *sent* alert, kept so its closing-line value can be captured near
+// kickoff. decimalOdds/market/line/outcome/referenceEventId mirror the field
+// names paper.mjs applyClosingLine/summarizeClv already key on, so those proven
+// CLV functions operate on these rows unchanged.
+export const CLV_LEDGER_COLUMNS = [
+  "identity", "sentAt", "referenceEventId", "sportKey", "bookmaker",
+  "market", "line", "outcome", "decimalOdds", "kickoffUtc",
+  "sendFairProbability", "status",
+  "closingFairOdds", "clv", "clvCapturedAt",
+];
 
 const exists = (path) => access(path).then(() => true, () => false);
 
@@ -67,6 +77,39 @@ export function selectSportGroups(rows, { maxSports = 2 } = {}) {
   return new Map(ranked.slice(0, maxSports));
 }
 
+// Snapshot a just-sent alert as a PENDING CLV row. The "opening" Pinnacle fair
+// probability is stored for reference; CLV itself is computed later against the
+// *closing* line (see paper.mjs applyClosingLine).
+export function buildClvTrackingRow(candidate, confirmation, { sentAt }) {
+  return {
+    identity: candidateIdentity(candidate),
+    sentAt,
+    referenceEventId: String(confirmation.referenceEventId),
+    sportKey: candidate.sportKey,
+    bookmaker: candidate.bookmaker,
+    market: candidate.market,
+    line: String(candidate.line ?? ""),
+    outcome: candidate.outcome,
+    decimalOdds: Number(candidate.offeredOdds).toFixed(4),
+    kickoffUtc: candidate.kickoffUtc,
+    sendFairProbability: Number(confirmation.pinnacleFairProbability).toFixed(6),
+    status: "PENDING",
+    closingFairOdds: "",
+    clv: "",
+    clvCapturedAt: "",
+  };
+}
+
+// Append-only by identity: an alert that re-fires (improved EV) keeps its first
+// tracking row, so the opening snapshot reflects when we first acted on it.
+export function mergeClvLedger(existing, incoming) {
+  const byIdentity = new Map(existing.map((row) => [row.identity, row]));
+  for (const row of incoming) {
+    if (!byIdentity.has(row.identity)) byIdentity.set(row.identity, row);
+  }
+  return [...byIdentity.values()];
+}
+
 export function shouldSendAlert(previous, confirmation) {
   if (!previous) return true;
   // Resend only on a >=5 percentage-point improvement. Subtract an epsilon so
@@ -79,6 +122,7 @@ export function createMispricingState({ reportsDir }) {
     queue: join(reportsDir, "mispricing-queue.csv"),
     alerts: join(reportsDir, "mispricing-alerts.csv"),
     audit: join(reportsDir, "mispricing-audit.csv"),
+    clv: join(reportsDir, "mispricing-clv.csv"),
     health: join(reportsDir, "mispricing-health.json"),
   };
   const readRows = async (path) => await exists(path) ? readCsv(path) : [];
@@ -127,6 +171,14 @@ export function createMispricingState({ reportsDir }) {
       );
     },
     writeAudit: (rows) => writeCsv(paths.audit, rows, AUDIT_COLUMNS),
+    async readClvLedger() {
+      return requireFields(
+        await readRows(paths.clv),
+        ["identity", "referenceEventId", "market", "outcome", "decimalOdds", "status"],
+        "clv",
+      );
+    },
+    writeClvLedger: (rows) => writeCsv(paths.clv, rows, CLV_LEDGER_COLUMNS),
     async readHealth() {
       if (!await exists(paths.health)) {
         return {

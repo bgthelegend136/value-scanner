@@ -94,6 +94,14 @@ test("confirms, sends once per book, records delivery, and does not duplicate", 
   assert.equal(second.sent, 0);
   assert.deepEqual(sent.sort(), ["Stoiximan", "Superbet"].sort());
   assert.equal((await state.readAlerts()).length, 2);
+
+  const clv = await state.readClvLedger();
+  assert.equal(clv.length, 2);
+  assert.ok(clv.every((row) => row.status === "PENDING"));
+  assert.ok(clv.every((row) => row.referenceEventId === "ref-501"));
+  assert.ok(clv.every((row) => Number(row.decimalOdds) === 2.4));
+  // The second run must not duplicate the tracking rows.
+  assert.equal((await state.readClvLedger()).length, 2);
 });
 
 test("dry run verifies but sends nothing and records no delivered alert", async () => {
@@ -105,6 +113,7 @@ test("dry run verifies but sends nothing and records no delivered alert", async 
   assert.equal(summary.sent, 0);
   assert.deepEqual(sent, []);
   assert.deepEqual(await state.readAlerts(), []);
+  assert.deepEqual(await state.readClvLedger(), []);
 });
 
 test("reference failure sends nothing and keeps candidates queued", async () => {
@@ -161,6 +170,7 @@ test("Telegram failure records no delivery and leaves a retryable queue", async 
   const summary = await runMispricingScan(d);
   assert.equal(summary.sent, 0);
   assert.deepEqual(await state.readAlerts(), []);
+  assert.deepEqual(await state.readClvLedger(), []);
   assert.equal((await state.readQueue()).length, 2);
   assert.equal((await state.readHealth()).telegramFailures, 2);
 });

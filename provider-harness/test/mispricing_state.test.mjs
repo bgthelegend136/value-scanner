@@ -5,8 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  buildClvTrackingRow,
   candidateIdentity,
   createMispricingState,
+  mergeClvLedger,
   mergeQueue,
   selectSportGroups,
   shouldSendAlert,
@@ -63,6 +65,49 @@ test("dedup sends first alert and only updates after five percentage points", ()
   assert.equal(
     shouldSendAlert({ minimumConfirmedEv: "0.14" }, { minimumConfirmedEv: 0.19 }),
     true,
+  );
+});
+
+test("builds a PENDING CLV tracking row from a candidate and confirmation", () => {
+  const row = buildClvTrackingRow(
+    candidate(),
+    { referenceEventId: "ref-501", pinnacleFairProbability: 0.416667 },
+    { sentAt: "2026-06-25T09:00:00Z" },
+  );
+  assert.equal(row.identity, "501|Stoiximan|MATCH_RESULT||1");
+  assert.equal(row.referenceEventId, "ref-501");
+  assert.equal(row.sportKey, "soccer_fifa_world_cup");
+  assert.equal(row.decimalOdds, "2.4000");
+  assert.equal(row.sendFairProbability, "0.416667");
+  assert.equal(row.status, "PENDING");
+  assert.equal(row.clv, "");
+});
+
+test("CLV ledger round-trips tracking rows and merges new identities only", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "mispricing-clv-"));
+  const state = createMispricingState({ reportsDir });
+  const first = buildClvTrackingRow(
+    candidate(),
+    { referenceEventId: "ref-501", pinnacleFairProbability: 0.4 },
+    { sentAt: "2026-06-25T09:00:00Z" },
+  );
+  await state.writeClvLedger([first]);
+  const restored = await state.readClvLedger();
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].identity, "501|Stoiximan|MATCH_RESULT||1");
+  assert.equal(restored[0].status, "PENDING");
+  assert.equal(restored[0].decimalOdds, "2.4000");
+
+  const second = buildClvTrackingRow(
+    candidate({ providerEventId: "777", outcome: "2" }),
+    { referenceEventId: "ref-777", pinnacleFairProbability: 0.3 },
+    { sentAt: "2026-06-25T10:00:00Z" },
+  );
+  const merged = mergeClvLedger(restored, [first, second]);
+  assert.equal(merged.length, 2);
+  assert.deepEqual(
+    merged.map((row) => row.identity).sort(),
+    ["501|Stoiximan|MATCH_RESULT||1", "777|Stoiximan|MATCH_RESULT||2"].sort(),
   );
 });
 
