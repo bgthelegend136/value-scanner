@@ -192,4 +192,17 @@ Each item lists the **why**, the **concrete change**, and **acceptance criteria*
 
 ## 8. First move for Codex
 
-P1, P2, and P6 (partial) are done. The highest-leverage remaining item is **P3 (second sharp source)** — it's the dead-end that keeps the confirmed-alert count at zero: the ≥10% mistakes land in leagues The Odds API doesn't carry. Read `src/mispricing_confirm.mjs` (the dual-confirmation gate) and `src/theodds_client.mjs`, then design an *alternative* sharp reference (e.g. Betfair Exchange fair price) that substitutes for Pinnacle when a fixture isn't covered — **without** lowering the EV floor or weakening dual confirmation (§0.1). Write the failing test first: a fixture absent from The Odds API but present in the second source can still confirm under the same floor; behavior is unchanged when both are present; fail-closed when neither is.
+Done so far: **P1** (CLV), **P2** (15-min two-tier cadence), **P6** (boost-check + boost-combo). Two live screenshots from the owner (Japan–Sweden boosts) show the **immediate** gap.
+
+There are two tracks; pick by intent:
+
+**Track A — finish the boost feature the owner is actively using (do this next).**
+The real boosts have **non-1X2 legs**: e.g. "Sweden win or draw" (double chance) + "Sweden Over 0.5 goals" (team total). `boost-combo` only prices 1/X/2 legs today. Implement **P7** starting with the two leg types those boosts use:
+1. **Double chance** (1X / 12 / X2): derive its fair probability by summing the relevant de-vigged 1X2 fair probs (already available from `devigPower`). No new feed needed.
+2. **Team totals / "team Over 0.5"** (= team to score ≥1): needs a market the reference carries; The Odds API h2h won't have it, so scope the data source first (it may not be available pre-match → may be P8/live-bound).
+   Start with double chance (pure, no new data) — write the failing test in `cli_boost_combo.test.mjs` for an X2 leg, extend `priceBoostLeg` to accept a leg `market` and compute the combined fair prob. Keep fail-closed for unsupported leg markets.
+
+**Track B — highest leverage for alert volume overall: P3 (second sharp source).**
+The ≥10% mistakes land in leagues The Odds API doesn't carry, so confirmed alerts stay ~0. Add an *alternative* sharp reference (e.g. Betfair Exchange) that substitutes for Pinnacle when a fixture isn't covered — **without** lowering the EV floor or weakening dual confirmation (§0.1). Read `src/mispricing_confirm.mjs` + `src/theodds_client.mjs`; test first: a fixture absent from The Odds API but present in the second source still confirms under the same floor; unchanged when both present; fail-closed when neither.
+
+How I (the previous session) would continue: **Track A, double-chance legs first** — it directly unblocks the owner's screenshots, needs no new external API, and is a clean TDD extension of `priceBoostLeg`. Then revisit team-totals (likely needs a live source, ties into P8).
