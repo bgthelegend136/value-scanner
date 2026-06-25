@@ -644,6 +644,108 @@ async function runBoostCheck(rest, { loadTheOddsKey, createTheOddsClient, out, e
   return 0;
 }
 
+// Resolve one combo leg to its de-vigged fair probabilities (Pinnacle + consensus)
+// using the same matching + confirmation path as a single selection. The EV here
+// is irrelevant (placeholder odds); we only want the fair probabilities to
+// multiply across legs.
+async function priceBoostLeg(client, leg, now) {
+  const candidate = {
+    sportSlug: leg.sportKey.startsWith("soccer") ? "football" : "other",
+    leagueSlug: "",
+    kickoffUtc: new Date(leg.date).toISOString(),
+    participantOne: leg.home,
+    participantTwo: leg.away,
+    market: "MATCH_RESULT",
+    line: "",
+    outcome: leg.pick,
+    offeredOdds: 2,
+  };
+  const events = await client.listEvents({ sportKey: leg.sportKey });
+  const match = matchCandidateEvent(candidate, events.data ?? []);
+  if (!match.event) return { ok: false, reason: match.reason, leg };
+  const odds = await client.getOdds({
+    sportKey: leg.sportKey,
+    eventIds: [String(match.event.id)],
+    markets: "h2h",
+  });
+  const selections = normalizeTheOddsResponse(odds.data ?? [], odds.receivedAt);
+  const result = confirmCandidate(candidate, match.event, selections, { now: now() });
+  const quota = odds.quota?.remaining;
+  if (result.pinnacleFairProbability === undefined) {
+    return { ok: false, reason: result.reason, leg, quota };
+  }
+  return {
+    ok: true,
+    leg,
+    pinnacleFairProbability: result.pinnacleFairProbability,
+    consensusFairProbability: result.consensusFairProbability,
+    quota,
+  };
+}
+
+function parseLegs(rest) {
+  return rest
+    .filter((arg) => arg.startsWith("--leg="))
+    .map((arg) => {
+      const [sportKey, home, away, date, pick] = arg.slice("--leg=".length).split(";");
+      return { sportKey, home, away, date, pick: String(pick ?? "").toUpperCase() };
+    });
+}
+
+// Price a multi-leg boosted parlay (e.g. a Stoiximan Bet Builder boost) against
+// real sharp odds: fair combo probability is the product of each leg's de-vigged
+// fair probability, so EV = boostedOdds * product - 1. v1: MATCH_RESULT legs only.
+async function runBoostCombo(rest, { loadTheOddsKey, createTheOddsClient, out, err, now }) {
+  const boosted = Number(flag(rest, "boost"));
+  const legs = parseLegs(rest);
+  if (!Number.isFinite(boosted) || boosted <= 1 || legs.length < 2) {
+    err('usage: boost-combo --boost=ODDS --leg="sportKey;home;away;date;pick" --leg=... (>=2 legs, pick 1|X|2)\n');
+    return 1;
+  }
+  for (const leg of legs) {
+    if (!leg.sportKey || !leg.home || !leg.away || !leg.date || !["1", "X", "2"].includes(leg.pick) ||
+      !Number.isFinite(new Date(leg.date).getTime())) {
+      err('boost-combo: each --leg needs "sportKey;home;away;date;pick" with pick 1|X|2 and a valid date\n');
+      return 1;
+    }
+  }
+
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  out(`Boost combo: ${legs.length} legs @ ${boosted}\n`);
+
+  const priced = [];
+  let quota = "?";
+  for (const leg of legs) {
+    const result = await priceBoostLeg(client, leg, now);
+    if (result.quota !== undefined) quota = result.quota;
+    priced.push(result);
+  }
+
+  priced.forEach((p, index) => {
+    const label = `Leg ${index + 1}: ${p.leg.home} vs ${p.leg.away} pick ${p.leg.pick}`;
+    out(p.ok
+      ? `  ${label} — fair ${(1 / p.pinnacleFairProbability).toFixed(2)}\n`
+      : `  ${label} — could not price (${p.reason})\n`);
+  });
+
+  if (priced.some((p) => !p.ok)) {
+    out("Combo cannot be verified: at least one leg is unpriced.\n");
+    out(`The Odds API quota remaining: ${quota}\n`);
+    return 0;
+  }
+
+  const comboPinnacle = priced.reduce((acc, p) => acc * p.pinnacleFairProbability, 1);
+  const comboConsensus = priced.reduce((acc, p) => acc * p.consensusFairProbability, 1);
+  const evPinnacle = boosted * comboPinnacle - 1;
+  const evConsensus = boosted * comboConsensus - 1;
+  out(`Pinnacle fair odds (combo): ${(1 / comboPinnacle).toFixed(2)} (EV ${signed(evPinnacle * 100, 1)}%)\n`);
+  out(`Consensus fair odds (combo): ${(1 / comboConsensus).toFixed(2)} (EV ${signed(evConsensus * 100, 1)}%)\n`);
+  const positive = evPinnacle > 0 && evConsensus > 0;
+  out(`Verdict: ${positive ? "+EV — both sharp references agree" : "Not +EV"}\n`);
+  out(`The Odds API quota remaining: ${quota}\n`);
+  return 0;
+}
+
 // `boost` is pure arithmetic — no network, no keys, no quota.
 function runBoost(rest, { out, err }) {
   const baseOdds = Number(flag(rest, "base"));
@@ -768,6 +870,11 @@ export async function runCli(argv, deps = {}) {
         loadTheOddsKey, createTheOddsClient, out, err, now,
       });
     }
+    if (command === "boost-combo") {
+      return await runBoostCombo(rest, {
+        loadTheOddsKey, createTheOddsClient, out, err, now,
+      });
+    }
     if (command === "evaluate") {
       const csvPath = rest[0];
       if (!csvPath) {
@@ -813,7 +920,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

@@ -30,7 +30,7 @@ Detect **bookmaker pricing mistakes** (≈10–20% edges) on **Stoiximan** and *
 
 ## 2. Current state (what already works)
 
-- **All tests green:** `node --test` → **132/132** passing.
+- **All tests green:** `node --test` → **135/135** passing.
 - **2026-06-26 — P1 (CLV feedback loop) shipped** on this branch (see §6). Sent alerts are now snapshotted to `reports/mispricing-clv.csv`; the new `mispricing-clv` command captures the Pinnacle closing line and reports realized CLV. Live capture against The Odds API is not yet scheduled.
 - **2026-06-26 — P2 (two-tier cadence) shipped** (see §6). `runMispricingScan` now exits before any reference call on a no-op cycle (zero Pinnacle credits), and the production installer repeats every 15 minutes instead of 3×/day. Not yet registered on the machine.
 - **2026-06-26 — P6 (boost evaluation) shipped, partial** (see §6). New `boost-check` command prices a user-supplied Stoiximan/Superbet enhanced-odds (Ενισχυμένες Αποδόσεις) selection against real de-vigged Pinnacle + consensus odds, replacing the offline `boost` calculator's assumed margin. MATCH_RESULT single picks only so far; combos/totals pending.
@@ -63,6 +63,9 @@ node src/cli.mjs mispricing-clv
 
 # Price a boost the user is looking at, against real sharp odds
 node src/cli.mjs boost-check --sport-key=soccer_fifa_world_cup --home="Japan" --away="Sweden" --date=2026-06-26T18:30:00Z --pick=1 --base=1.78 --boost=2.40
+
+# Price a multi-leg (Bet Builder) boost: product of each leg's fair probability
+node src/cli.mjs boost-combo --boost=2.50 --leg="soccer_fifa_world_cup;Japan;Sweden;2026-06-26T18:30:00Z;2" --leg="soccer_fifa_world_cup;Brazil;Serbia;2026-06-26T21:00:00Z;1"
 
 # Verify Telegram delivery path
 node src/cli.mjs telegram-test
@@ -162,7 +165,8 @@ Each item lists the **why**, the **concrete change**, and **acceptance criteria*
 **Why:** Stoiximan/Superbet enhanced odds (Ενισχυμένες Αποδόσεις) are a prime source of mistakes and the owner's direct interest, but the offline `boost` calculator only guesses the market margin.
 **Delivered:** `cli.mjs` `boost-check` builds a synthetic MATCH_RESULT candidate from user-supplied boost details (no scraping — §0.2) and runs it through the real `confirmCandidate` dual confirmation, reporting Pinnacle & consensus fair odds + true EV + a verdict. Tests in `cli_boost_check.test.mjs` (+2).
 **Constraint reality:** fully *automatic* boost discovery is impossible without scraping the bookmaker site (forbidden). This is the supported model: the owner sees the boost, supplies it, the tool gives a rigorous verdict.
-**Still open:** combo/parlay boosts (price each leg, multiply), TOTALS/handicap boosts (needs P7), and a friendlier input than CLI flags (e.g. a guided prompt); optionally log boost verdicts for CLV like alerts.
+**Combo support added (2026-06-26):** `boost-combo` prices a multi-leg parlay — fair combo probability = product of each leg's de-vigged fair probability, EV = boostedOdds × product − 1; fail-closed if any leg can't be priced. Helper `priceBoostLeg` in `cli.mjs`; tests in `cli_boost_combo.test.mjs` (+3).
+**Still open — this is the real-world gap (see the owner's live screenshot, Japan–Sweden):** boost *legs* are often **not** plain 1X2 — e.g. "Sweden win or draw" (double chance) + "Sweden Over 0.5 goals" (team total). Those leg market types need P7 (markets beyond 1X2: double chance, team totals, totals). Also live/in-play boosts need P8. Until then `boost-combo` only handles MATCH_RESULT (1/X/2) legs; for anything else fall back to the offline `boost` calculator (assumed margins) and say so.
 
 ### P7 — Markets beyond 1X2 (TOTALS, handicaps, props)
 **Why:** Bookmaker mistakes are *more* common in softer markets (over/under, team totals, cards, corners, player props) than in the sharp 1X2 line — the current pipeline ignores all of them.
