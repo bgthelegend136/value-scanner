@@ -111,6 +111,7 @@ export async function runMispricingScan({
   if (discovered.length === 0 && existingQueue.length === 0) {
     await state.writeQueue([]);
     await state.writeHealth(health);
+    await state.writeHeartbeat({ lastSuccessAt: now.toISOString(), summary });
     out(`${JSON.stringify(summary)}\n`);
     return summary;
   }
@@ -280,6 +281,7 @@ export async function runMispricingScan({
   await state.writeClvLedger(mergeClvLedger(existingClv, clvTracked));
   await state.writeAudit(audit);
   await state.writeHealth(health);
+  await state.writeHeartbeat({ lastSuccessAt: now.toISOString(), summary });
   out(`${JSON.stringify(summary)}\n`);
   return summary;
 }

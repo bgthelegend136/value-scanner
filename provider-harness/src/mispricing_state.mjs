@@ -124,6 +124,7 @@ export function createMispricingState({ reportsDir }) {
     audit: join(reportsDir, "mispricing-audit.csv"),
     clv: join(reportsDir, "mispricing-clv.csv"),
     health: join(reportsDir, "mispricing-health.json"),
+    heartbeat: join(reportsDir, "mispricing-heartbeat.json"),
   };
   const readRows = async (path) => await exists(path) ? readCsv(path) : [];
   const requireFields = (rows, fields, label) => {
@@ -198,6 +199,20 @@ export function createMispricingState({ reportsDir }) {
     async writeHealth(value) {
       await mkdir(reportsDir, { recursive: true });
       await writeFile(paths.health, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    },
+    // Liveness signal: the timestamp (and summary) of the last successful run, so
+    // an external monitor can detect a silently-dead scheduled scanner.
+    async readHeartbeat() {
+      if (!await exists(paths.heartbeat)) return {};
+      try {
+        return JSON.parse(await readFile(paths.heartbeat, "utf8"));
+      } catch {
+        return {};
+      }
+    },
+    async writeHeartbeat(value) {
+      await mkdir(reportsDir, { recursive: true });
+      await writeFile(paths.heartbeat, `${JSON.stringify(value, null, 2)}\n`, "utf8");
     },
   };
 }

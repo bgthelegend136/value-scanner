@@ -104,6 +104,25 @@ test("confirms, sends once per book, records delivery, and does not duplicate", 
   assert.equal((await state.readClvLedger()).length, 2);
 });
 
+test("records a heartbeat with the last success time and summary", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-heartbeat-"));
+  const state = createMispricingState({ reportsDir });
+  const summary = await runMispricingScan(deps({ reportsDir, state, sent: [] }));
+  const beat = await state.readHeartbeat();
+  assert.equal(beat.lastSuccessAt, now.toISOString());
+  assert.equal(beat.summary.confirmed, summary.confirmed);
+});
+
+test("records a heartbeat even on a no-op detection cycle", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-heartbeat-noop-"));
+  const state = createMispricingState({ reportsDir });
+  const d = deps({ reportsDir, state });
+  d.valueBetsClient.getValueBets = async () => ({ data: [], receivedAt: now.toISOString() });
+  d.referenceClient.listSports = async () => { throw new Error("must not be called"); };
+  await runMispricingScan(d);
+  assert.equal((await state.readHeartbeat()).lastSuccessAt, now.toISOString());
+});
+
 test("dry run verifies but sends nothing and records no delivered alert", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-dry-"));
   const state = createMispricingState({ reportsDir });
