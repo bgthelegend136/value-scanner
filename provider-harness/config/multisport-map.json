@@ -1,9 +1,12 @@
 {
   "american-football|usa-nfl": "americanfootball_nfl",
   "baseball|japan-professional-baseball-central-league": "baseball_npb",
+  "baseball|usa-mlb": "baseball_mlb",
+  "football|brazil-brasileiro-serie-a": "soccer_brazil_campeonato",
   "football|brazil-brasileiro-serie-b": "soccer_brazil_serie_b",
   "football|england-premier-league": "soccer_epl",
   "football|international-fifa-world-cup": "soccer_fifa_world_cup",
+  "football|ireland-premier-division": "soccer_league_of_ireland",
   "football|italy-serie-a": "soccer_italy_serie_a",
   "football|sweden-superettan": "soccer_sweden_superettan"
 }

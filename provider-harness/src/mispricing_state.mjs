@@ -3,20 +3,20 @@ import { join } from "node:path";
 import { readCsv, writeCsv } from "./csv.mjs";
 
 export const QUEUE_COLUMNS = [
-  "candidateId", "providerEventId", "bookmaker", "sportKey",
+  "candidateId", "providerEventId", "bookmaker", "referenceSource", "sportKey",
   "sportSlug", "leagueSlug", "sportName", "leagueName",
   "kickoffUtc", "participantOne", "participantTwo",
   "market", "line", "outcome", "offeredOdds", "providerExpectedValue",
   "valueUpdatedAt", "receivedAt", "link", "linkDepth", "firstQueuedAt",
 ];
 export const ALERT_COLUMNS = [
-  "identity", "sentAt", "candidateId", "providerEventId", "referenceEventId",
+  "identity", "sentAt", "candidateId", "providerEventId", "referenceSource", "referenceEventId",
   "bookmaker", "market", "line", "outcome", "offeredOdds",
   "pinnacleEv", "consensusEv", "minimumConfirmedEv", "telegramMessageId",
 ];
 export const AUDIT_COLUMNS = [
   "auditedAt", "runMode", "candidateId", "providerEventId", "bookmaker",
-  "sportKey", "sportSlug", "leagueSlug", "sportName", "leagueName",
+  "referenceSource", "sportKey", "sportSlug", "leagueSlug", "sportName", "leagueName",
   "market", "line", "outcome", "status", "reason",
   "pinnacleEv", "consensusEv", "consensusBooks", "edgeOverDispersion",
 ];
@@ -25,7 +25,7 @@ export const AUDIT_COLUMNS = [
 // names paper.mjs applyClosingLine/summarizeClv already key on, so those proven
 // CLV functions operate on these rows unchanged.
 export const CLV_LEDGER_COLUMNS = [
-  "identity", "sentAt", "referenceEventId", "sportKey", "bookmaker",
+  "identity", "sentAt", "referenceSource", "referenceEventId", "sportKey", "bookmaker",
   "market", "line", "outcome", "decimalOdds", "kickoffUtc",
   "sendFairProbability", "status",
   "closingFairOdds", "clv", "clvCapturedAt",
@@ -38,6 +38,10 @@ export function candidateIdentity(row) {
     row.providerEventId, row.bookmaker, row.market,
     String(row.line ?? ""), row.outcome,
   ].join("|");
+}
+
+export function sportGroupKey(row) {
+  return row.referenceSource ? `${row.referenceSource}|${row.sportKey}` : row.sportKey;
 }
 
 export function mergeQueue(existing, incoming, { now }) {
@@ -63,8 +67,9 @@ export function mergeQueue(existing, incoming, { now }) {
 export function selectSportGroups(rows, { maxSports = 2 } = {}) {
   const bySport = new Map();
   for (const row of rows) {
-    if (!bySport.has(row.sportKey)) bySport.set(row.sportKey, []);
-    bySport.get(row.sportKey).push(row);
+    const key = sportGroupKey(row);
+    if (!bySport.has(key)) bySport.set(key, []);
+    bySport.get(key).push(row);
   }
   const ranked = [...bySport.entries()].sort(([, left], [, right]) => {
     const maxEv = (group) => Math.max(...group.map((row) => Number(row.providerExpectedValue)));
@@ -84,6 +89,7 @@ export function buildClvTrackingRow(candidate, confirmation, { sentAt }) {
   return {
     identity: candidateIdentity(candidate),
     sentAt,
+    referenceSource: candidate.referenceSource || "the-odds-api",
     referenceEventId: String(confirmation.referenceEventId),
     sportKey: candidate.sportKey,
     bookmaker: candidate.bookmaker,

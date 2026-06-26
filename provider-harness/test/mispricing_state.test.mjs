@@ -12,6 +12,7 @@ import {
   mergeQueue,
   selectSportGroups,
   shouldSendAlert,
+  sportGroupKey,
 } from "../src/mispricing_state.mjs";
 
 function candidate(overrides = {}) {
@@ -56,6 +57,15 @@ test("selects at most two sport groups by EV, kickoff, then queue age", () => {
   assert.deepEqual([...selected.keys()], ["sport-b", "sport-c"]);
 });
 
+test("keeps identical sports separate when reference sources differ", () => {
+  const selected = selectSportGroups([
+    candidate({ sportKey: "sport-a", referenceSource: "the-odds-api", providerExpectedValue: 0.30 }),
+    candidate({ sportKey: "sport-a", referenceSource: "opticodds", providerExpectedValue: 0.40 }),
+    candidate({ sportKey: "sport-b", referenceSource: "the-odds-api", providerExpectedValue: 0.10 }),
+  ]);
+  assert.equal(sportGroupKey(candidate({ sportKey: "sport-a" })), "sport-a");
+  assert.deepEqual([...selected.keys()], ["opticodds|sport-a", "the-odds-api|sport-a"]);
+});
 test("dedup sends first alert and only updates after five percentage points", () => {
   assert.equal(shouldSendAlert(null, { minimumConfirmedEv: 0.14 }), true);
   assert.equal(

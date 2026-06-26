@@ -55,6 +55,18 @@ function referenceOdds() {
   }];
 }
 
+function secondaryReferenceOdds() {
+  return [{
+    id: "secondary-501", sport_title: "FIFA World Cup", commence_time: KICKOFF,
+    home_team: "Japan", away_team: "Sweden",
+    bookmakers: [
+      refBook("pinnacle", 1.95, 3.6, 3.9),
+      refBook("betsson", 1.95, 3.6, 3.9),
+      refBook("unibet", 1.95, 3.6, 3.9),
+      refBook("williamhill", 1.95, 3.6, 3.9),
+    ],
+  }];
+}
 function deps({ reportsDir, state, sent = [], quotaRemaining = 498 }) {
   return {
     valueBetsClient: {
@@ -198,6 +210,100 @@ test("uses exact active-sport metadata when the static registry has no entry", a
 
   assert.equal(summary.mapped, 2);
   assert.equal(summary.sent, 2);
+});
+
+test("uses a secondary reference source when the primary source cannot map the league", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-secondary-map-"));
+  const state = createMispricingState({ reportsDir });
+  const sent = [];
+  const secondaryCalls = [];
+  const d = deps({ reportsDir, state, sent });
+  d.registry = new Map();
+  d.referenceClient.listSports = async () => ({
+    data: [{ key: "soccer_other", group: "Soccer", title: "Other Soccer", active: true }],
+  });
+
+  const summary = await runMispricingScan({
+    ...d,
+    secondaryReferenceClients: [{
+      name: "secondary-reference",
+      client: {
+        async listSports() {
+          secondaryCalls.push("listSports");
+          return {
+            data: [{
+              key: "soccer_fifa_world_cup",
+              group: "Soccer",
+              title: "FIFA World Cup",
+              active: true,
+            }],
+          };
+        },
+        async listEvents() {
+          secondaryCalls.push("listEvents");
+          return { data: [{ id: "secondary-501", home_team: "Japan", away_team: "Sweden", commence_time: KICKOFF }] };
+        },
+        async getOdds() {
+          secondaryCalls.push("getOdds");
+          return { data: secondaryReferenceOdds(), receivedAt: now.toISOString(), quota: { remaining: 450, lastCost: 1 } };
+        },
+      },
+    }],
+  });
+
+  assert.equal(summary.mapped, 2);
+  assert.equal(summary.confirmed, 2);
+  assert.equal(summary.sent, 2);
+  assert.ok(secondaryCalls.includes("getOdds"));
+  const audit = await state.readAudit();
+  assert.ok(audit.some((row) => row.referenceSource === "secondary-reference" && row.status === "CONFIRMED"));
+});
+
+test("falls back to a secondary reference source when primary odds lack Pinnacle coverage", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-secondary-confirm-"));
+  const state = createMispricingState({ reportsDir });
+  const sent = [];
+  const d = deps({ reportsDir, state, sent });
+  d.referenceClient.getOdds = async () => ({
+    data: [{
+      id: "ref-501",
+      sport_title: "FIFA World Cup",
+      commence_time: KICKOFF,
+      home_team: "Japan",
+      away_team: "Sweden",
+      bookmakers: [
+        refBook("betsson", 1.95, 3.6, 3.9),
+        refBook("unibet", 1.95, 3.6, 3.9),
+        refBook("williamhill", 1.95, 3.6, 3.9),
+      ],
+    }],
+    receivedAt: now.toISOString(),
+    quota: { remaining: 498, lastCost: 1 },
+  });
+
+  const summary = await runMispricingScan({
+    ...d,
+    secondaryReferenceClients: [{
+      name: "secondary-reference",
+      client: {
+        async listSports() {
+          return { data: [{ key: "soccer_fifa_world_cup", active: true }] };
+        },
+        async listEvents() {
+          return { data: [{ id: "secondary-501", home_team: "Japan", away_team: "Sweden", commence_time: KICKOFF }] };
+        },
+        async getOdds() {
+          return { data: secondaryReferenceOdds(), receivedAt: now.toISOString(), quota: { remaining: 450, lastCost: 1 } };
+        },
+      },
+    }],
+  });
+
+  assert.equal(summary.confirmed, 2);
+  assert.equal(summary.sent, 2);
+  const audit = await state.readAudit();
+  assert.ok(audit.some((row) => row.referenceSource === "the-odds-api" && row.reason === "NO_EXACT_PINNACLE_MARKET"));
+  assert.ok(audit.some((row) => row.referenceSource === "secondary-reference" && row.status === "CONFIRMED"));
 });
 
 test("Telegram failure records no delivery and leaves a retryable queue", async () => {

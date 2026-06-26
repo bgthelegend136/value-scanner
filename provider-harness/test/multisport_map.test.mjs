@@ -77,6 +77,96 @@ test("infers a unique active sport from exact normalized provider titles", () =>
   );
 });
 
+test("infers active sports through explicit league title aliases only", () => {
+  const activeSports = [
+    { key: "basketball_puerto_rico_bsn", group: "Basketball", title: "Baloncesto Superior Nacional", active: true },
+    { key: "soccer_club_friendly", group: "Soccer", title: "Club Friendlies", active: true },
+    { key: "soccer_australia_victoria_npl_women", group: "Soccer", title: "Victoria NPL Women", active: true },
+  ];
+  const activeKeys = new Set(activeSports.map((sport) => sport.key));
+
+  assert.deepEqual(
+    resolveSportKey(
+      {
+        sportSlug: "basketball",
+        leagueSlug: "puerto-rico-bsn",
+        sportName: "Basketball",
+        leagueName: "Puerto Rico - BSN",
+      },
+      new Map(),
+      activeKeys,
+      activeSports,
+    ),
+    { sportKey: "basketball_puerto_rico_bsn", reason: "" },
+  );
+
+  assert.deepEqual(
+    resolveSportKey(
+      {
+        sportSlug: "football",
+        leagueSlug: "international-clubs-club-friendly-games",
+        sportName: "Football",
+        leagueName: "International Clubs - Club Friendly Games",
+      },
+      new Map(),
+      activeKeys,
+      activeSports,
+    ),
+    { sportKey: "soccer_club_friendly", reason: "" },
+  );
+
+  assert.deepEqual(
+    resolveSportKey(
+      {
+        sportSlug: "football",
+        leagueSlug: "australia-victoria-npl-women",
+        sportName: "Football",
+        leagueName: "Australia - Victoria NPL, Women",
+      },
+      new Map(),
+      activeKeys,
+      activeSports,
+    ),
+    { sportKey: "soccer_australia_victoria_npl_women", reason: "" },
+  );
+});
+test("maps observed provider league names to active The Odds API titles", () => {
+  const activeSports = [
+    { key: "soccer_brazil_campeonato", group: "Soccer", title: "Brazil Série A", active: true },
+    { key: "soccer_league_of_ireland", group: "Soccer", title: "League of Ireland", active: true },
+  ];
+  const activeKeys = new Set(activeSports.map((sport) => sport.key));
+
+  assert.deepEqual(
+    resolveSportKey(
+      {
+        sportSlug: "football",
+        leagueSlug: "brazil-brasileiro-serie-a",
+        sportName: "Football",
+        leagueName: "Brazil - Brasileiro Serie A",
+      },
+      new Map(),
+      activeKeys,
+      activeSports,
+    ),
+    { sportKey: "soccer_brazil_campeonato", reason: "" },
+  );
+
+  assert.deepEqual(
+    resolveSportKey(
+      {
+        sportSlug: "football",
+        leagueSlug: "ireland-premier-division",
+        sportName: "Football",
+        leagueName: "Ireland - Premier Division",
+      },
+      new Map(),
+      activeKeys,
+      activeSports,
+    ),
+    { sportKey: "soccer_league_of_ireland", reason: "" },
+  );
+});
 test("automatic mapping refuses non-exact and ambiguous league names", () => {
   const activeSports = [
     { key: "soccer_epl", group: "Soccer", title: "EPL", active: true },
@@ -135,6 +225,9 @@ test("the shipped seed registry is valid and loadable", async () => {
     "baseball_npb",
   );
   assert.equal(registry.get("football|england-premier-league"), "soccer_epl");
+  assert.equal(registry.get("baseball|usa-mlb"), "baseball_mlb");
+  assert.equal(registry.get("football|brazil-brasileiro-serie-a"), "soccer_brazil_campeonato");
+  assert.equal(registry.get("football|ireland-premier-division"), "soccer_league_of_ireland");
   for (const [key, value] of registry) {
     assert.match(key, /^[a-z0-9-]+\|[a-z0-9-]+$/u);
     assert.match(String(value), /^[a-z0-9_]+$/u);

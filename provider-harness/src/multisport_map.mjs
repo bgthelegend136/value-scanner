@@ -2,6 +2,15 @@ import { readFile } from "node:fs/promises";
 
 const KEY_PATTERN = /^[a-z0-9-]+\|[a-z0-9-]+$/u;
 
+const LEAGUE_TITLE_ALIASES = new Map([
+  ["basketball|puerto-rico-bsn", ["BSN", "Baloncesto Superior Nacional"]],
+  ["football|brazil-brasileiro-serie-a", ["Brazil Serie A", "Brazil Série A"]],
+  ["football|ireland-premier-division", ["League of Ireland", "Airtricity League Premier Division"]],
+  ["football|international-clubs-club-friendly-games", ["Club Friendlies", "Club Friendly Games"]],
+  ["football|australia-victoria-npl-women", ["Victoria NPL Women", "NPL Victoria Women"]],
+  ["football|australia-u20-victoria-npl-women", ["U20 Victoria NPL Women", "Victoria NPL U20 Women"]],
+]);
+
 function normalized(value) {
   return String(value ?? "")
     .normalize("NFKD")
@@ -30,17 +39,32 @@ function sameParts(left, right) {
   return leftSorted.every((value, index) => value === rightSorted[index]);
 }
 
-function exactLeagueTitleMatch(candidate, referenceSport) {
-  const candidateName = candidate.leagueName || candidate.leagueSlug;
+function exactTitleMatch(candidateName, referenceTitle) {
   const candidateFull = normalized(candidateName);
-  const referenceFull = normalized(referenceSport.title);
+  const referenceFull = normalized(referenceTitle);
   const candidateParts = nameParts(candidateName);
-  const referenceParts = nameParts(referenceSport.title);
+  const referenceParts = nameParts(referenceTitle);
 
   return candidateFull === referenceFull ||
     candidateParts.at(-1) === referenceFull ||
     referenceParts.at(-1) === candidateFull ||
     sameParts(candidateParts, referenceParts);
+}
+
+function leagueTitleVariants(candidate) {
+  const registryKey = `${candidate.sportSlug}|${candidate.leagueSlug}`;
+  const values = [
+    candidate.leagueName,
+    candidate.leagueSlug,
+    ...(LEAGUE_TITLE_ALIASES.get(registryKey) ?? []),
+  ];
+  return [...new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))];
+}
+
+function exactLeagueTitleMatch(candidate, referenceSport) {
+  return leagueTitleVariants(candidate).some((candidateName) =>
+    exactTitleMatch(candidateName, referenceSport.title),
+  );
 }
 
 function inferActiveSportKey(candidate, activeSports) {
