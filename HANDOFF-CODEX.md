@@ -34,6 +34,13 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-26 (Codex ops).** `Bet-Paper-Settle` is now
+> registered in Windows Task Scheduler and will run daily at 07:30 local time.
+> First scheduled run is `2026-06-27 07:30`; it has not run yet
+> (`LastTaskResult=267011`). `Bet-Paper-Scan` remains active; next run observed
+> at `2026-06-27 00:00`. Latest no-quota `clv-report`: 15 captured CLV rows,
+> 14 positive, beat rate 93.3%, average CLV +2.2%. Latest live The Odds API
+> quota check: 314 remaining / 186 used, with `/sports` costing 0 credits.
 > **Status update 2026-06-26 (Codex paper-settle scheduler).** Added daily paper
 > settlement scripts: `scripts/run-paper-settle.ps1` and
 > `scripts/install-paper-settle-task.ps1`. The runner executes `node src/cli.mjs
