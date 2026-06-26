@@ -3,8 +3,18 @@ export const PAPER_COLUMNS = [
   "homeTeam", "awayTeam", "bookmaker", "market", "line", "outcome",
   "decimalOdds", "fairOdds", "fairProbability", "ev", "tier", "stake",
   "status", "homeScore", "awayScore", "profit", "settledAt",
-  "closingFairOdds", "clv", "clvCapturedAt",
+  "closingFairOdds", "clv", "clvCapturedAt", "sportKey",
 ];
+
+// Paper bets predate multi-league scanning, so older ledger rows have no
+// sportKey. They were all World Cup, so that is the safe backfill for settle/CLV
+// grouping. New rows always carry their own sportKey from the scan.
+export const LEGACY_SPORT_KEY = "soccer_fifa_world_cup";
+
+export function paperSportKey(row) {
+  const value = String(row.sportKey ?? "").trim();
+  return value || LEGACY_SPORT_KEY;
+}
 
 const TERMINAL_STATUSES = new Set(["WON", "LOST", "PUSH", "REVIEW"]);
 const SETTLED_STATUSES = new Set(["WON", "LOST", "PUSH"]);
@@ -53,6 +63,7 @@ function paperRow({ result, fixture }, firstSeenAt) {
   return {
     referenceEventId: String(fixture.referenceEventId),
     bettableEventId: String(fixture.bettableEventId),
+    sportKey: String(fixture.sportKey ?? ""),
     firstSeenAt,
     kickoffUtc: fixture.kickoffUtc,
     homeTeam: fixture.homeTeam,

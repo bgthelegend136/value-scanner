@@ -305,20 +305,20 @@ function opportunityRow(result, fixture, consensus) {
   };
 }
 
-async function runScan({
-  loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
+// Price one league's Stoiximan/Superbet odds against its Pinnacle reference.
+// Every returned opportunity/pair carries the league's sportKey so paper bets,
+// CLV capture, and settlement can later query the right reference sport.
+async function scanLeague({
+  oddsClient, theOddsClient, sport, leagueSlug, sportKey, threshold,
 }) {
-  const oddsClient = createClient({ apiKey: await loadApiKey() });
-  const theOddsClient = createTheOddsClient({ apiKey: await loadTheOddsKey() });
-
-  const referenceEventsRaw = await theOddsClient.listEvents({ sportKey: WORLD_CUP_SPORT_KEY });
+  const referenceEventsRaw = await theOddsClient.listEvents({ sportKey });
   const referenceFixtures = toFixtureList(referenceEventsRaw.data ?? [], (e) => ({
     eventId: String(e.id), homeTeam: e.home_team, awayTeam: e.away_team, kickoffUtc: e.commence_time,
   }));
 
   const oddsEventsRaw = await oddsClient.listEvents({
-    sport: "football",
-    league: WORLD_CUP_LEAGUE_SLUG,
+    sport,
+    league: leagueSlug,
     status: "pending",
     limit: 100,
   });
@@ -327,9 +327,9 @@ async function runScan({
     eventId: String(e.id), homeTeam: e.home, awayTeam: e.away, kickoffUtc: e.date,
   }));
 
-  const pairs = matchFixtures(referenceFixtures, bettableFixtures);
+  const pairs = matchFixtures(referenceFixtures, bettableFixtures).map((pair) => ({ ...pair, sportKey }));
 
-  const referenceOdds = await theOddsClient.getOdds({ sportKey: WORLD_CUP_SPORT_KEY });
+  const referenceOdds = await theOddsClient.getOdds({ sportKey });
   const allReferenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt);
   const referenceSelections = allReferenceSelections.filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
 
@@ -371,12 +371,53 @@ async function runScan({
     }
   }
 
+  return {
+    matchedFixtures: pairs.length,
+    opportunities,
+    allRows,
+    quotaRemaining: referenceOdds.quota?.remaining,
+  };
+}
+
+async function runScan({
+  loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
+  loadRegistry = loadSportRegistry, registryPath = DEFAULT_SPORT_MAP,
+}) {
+  const oddsClient = createClient({ apiKey: await loadApiKey() });
+  const theOddsClient = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+
+  // Scan every mapped league whose sharp reference sport is in season now. The
+  // map pairs an Odds-API.io `sport|league` slug with a The Odds API sport key.
+  const registry = await loadRegistry(registryPath);
+  const sportsRes = await theOddsClient.listSports();
+  const activeKeys = new Set(
+    (sportsRes.data ?? []).filter((s) => s.active !== false).map((s) => String(s.key)),
+  );
+  const leagues = [];
+  for (const [slug, sportKey] of registry) {
+    if (!activeKeys.has(sportKey)) continue;
+    const [sport, leagueSlug] = slug.split("|");
+    leagues.push({ sport, leagueSlug, sportKey });
+  }
+
+  const opportunities = [];
+  const allRows = [];
+  let matchedFixtures = 0;
+  let quotaRemaining;
+  for (const league of leagues) {
+    const result = await scanLeague({ oddsClient, theOddsClient, ...league, threshold });
+    opportunities.push(...result.opportunities);
+    allRows.push(...result.allRows);
+    matchedFixtures += result.matchedFixtures;
+    if (result.quotaRemaining !== undefined) quotaRemaining = result.quotaRemaining;
+  }
+
   opportunities.sort((a, b) => b.result.ev - a.result.ev);
 
-  const header = `World Cup value scan — ${pairs.length} matched fixtures, ${opportunities.length} value bets (EV >= ${(threshold * 100).toFixed(1)}%).`;
+  const header = `Value scan — ${leagues.length} in-season league${leagues.length === 1 ? "" : "s"}, ${matchedFixtures} matched fixtures, ${opportunities.length} value bets (EV >= ${(threshold * 100).toFixed(1)}%).`;
   out(`${header}\n\n`);
   for (const { result, fixture } of opportunities) out(`${formatAlert(result, { fixture })}\n\n`);
-  out(`The Odds API quota remaining: ${referenceOdds.quota?.remaining ?? "?"}\n`);
+  out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
 
   const stamp = stampFrom(now);
   const reportPath = join(reportsDir, `scan-${stamp}.csv`);
@@ -964,10 +1005,11 @@ export async function runCli(argv, deps = {}) {
     }
     if (command === "scan") {
       const edgeArg = rest.find((a) => a.startsWith("--edge="));
-      const parsed = edgeArg ? Number(edgeArg.split("=")[1]) / 100 : 0.03;
-      const threshold = Number.isFinite(parsed) ? parsed : 0.03;
+      const parsed = edgeArg ? Number(edgeArg.split("=")[1]) / 100 : 0.02;
+      const threshold = Number.isFinite(parsed) ? parsed : 0.02;
       return await runScan({
         loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
+        loadRegistry, registryPath: sportMapPath,
       });
     }
     if (command === "settle") {
