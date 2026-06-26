@@ -4,10 +4,11 @@
 // line; TOTALS from the de-vigged over/under at the exact line. Team totals /
 // BTTS are NOT here — The Odds API h2h/totals does not carry them (needs another
 // source; see handoff P7/P8).
-import { devigPower } from "./value.mjs";
-
-const MAX_AGE_MS = 10 * 60 * 1000;
-const EXCLUDED_CONSENSUS = new Set(["pinnacle", "stoiximan", "superbet"]);
+import {
+  CONSENSUS_EXCLUDED_BOOKS as EXCLUDED_CONSENSUS,
+  MAX_QUOTE_AGE_MS as MAX_AGE_MS,
+} from "./mispricing_thresholds.mjs";
+import { devigPower, median } from "./value.mjs";
 
 const DOUBLE_CHANCE = {
   "1X": ["1", "X"], X1: ["1", "X"],
@@ -25,13 +26,6 @@ export function parseLegPick(pick) {
   const totals = token.match(/^([OU])(\d+(?:\.\d+)?)$/u);
   if (totals) return { market: "TOTALS", outcome: totals[1] === "O" ? "OVER" : "UNDER", line: totals[2] };
   return null;
-}
-
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.length === 0) return null;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function fresh(rows, now, maxAgeMs) {

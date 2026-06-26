@@ -1,18 +1,12 @@
 import { selectionKey } from "./mispricing_match.mjs";
-import { MIN_CONFIRMED_EV } from "./mispricing_thresholds.mjs";
-import { devigPower } from "./value.mjs";
+import {
+  CONSENSUS_EXCLUDED_BOOKS as EXCLUDED_CONSENSUS,
+  MAX_QUOTE_AGE_MS as MAX_AGE_MS,
+  MIN_CONFIRMED_EV,
+} from "./mispricing_thresholds.mjs";
+import { devigPower, median } from "./value.mjs";
 
-const MAX_AGE_MS = 10 * 60 * 1000;
-const EXCLUDED_CONSENSUS = new Set(["pinnacle", "stoiximan", "superbet"]);
-
-export function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.length === 0) return null;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
-}
+export { median };
 
 function exactMarket(rows, candidate) {
   return rows.filter((row) =>

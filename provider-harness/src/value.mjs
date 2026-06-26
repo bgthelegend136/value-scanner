@@ -1,3 +1,12 @@
+// Shared median for fair-probability consensus. Ignores non-finite samples and
+// returns undefined for an empty set, so callers can gate on `result > 0`.
+export function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length === 0) return undefined;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 export function devig(referenceSelections) {
   const groups = new Map();
   for (const selection of referenceSelections) {
