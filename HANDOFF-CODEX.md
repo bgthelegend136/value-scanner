@@ -399,6 +399,21 @@ these in order; all are free/cheap and must follow the §0 rules and TDD.
 5. **P3 (3rd reference provider) stays deprioritized** — the 2026-06-26 audit showed
    the bottleneck is candidate EV before confirmation, not reference coverage.
 
+### Decision 2026-06-27 — SportsGameOdds (SGO): DO NOT integrate yet
+
+A SportsGameOdds free key was obtained and integrating it as a 3rd reference was
+proposed. **Decision: defer. Do not build `sports_game_odds_client.mjs` now.** Reasons:
+- It is P3, which is deprioritized — the bottleneck is candidate EV under the floor,
+  not reference coverage. A 3rd reference does not address that.
+- SGO's free tier is US-centric (8 leagues NBA/NFL/MLB/NHL/EPL/UCL/NCAA, 9 US books,
+  2,500 objects/month, ~10-min updates). It does not cover the World Cup or the
+  Greek/lower leagues; for the leagues it does cover (MLB/NFL/EPL — already in our
+  map) The Odds API already provides Pinnacle, so SGO is largely redundant.
+- Allowed only as a cheap, reversible probe: a one-off `sgo-test` coverage check
+  (~1 object) to confirm whether it lists anything The Odds API does not, with
+  Pinnacle. Do NOT wire it into the scan/Telegram path. Revisit only if the data
+  experiment later shows confirmation coverage (not the EV floor) is the limiter.
+
 Owner quota note: The Odds API free tier is ~500 credits/month; each full `scan`
 ≈ 20 credits. The 8-hour paper-scan burns ~60/day — fine for a ~3-day window, but
 the owner should disable/review `Bet-Paper-Scan` after the data-collection run.
