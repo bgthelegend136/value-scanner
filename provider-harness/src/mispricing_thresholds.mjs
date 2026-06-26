@@ -23,6 +23,13 @@ export const MIN_CONFIRMED_EV = 0.1;
 // the live distribution.
 export const MIN_EDGE_OVER_DISPERSION = 1.0;
 
+// Bankroll sizing for a confirmed alert. We never stake full Kelly because the
+// fair probability is an estimate: KELLY_FRACTION shrinks the bet (quarter-Kelly
+// is the usual hedge against model error) and STAKE_CAP_FRACTION is a hard
+// ceiling as a fraction of bankroll. See src/staking.mjs.
+export const KELLY_FRACTION = 0.25;
+export const STAKE_CAP_FRACTION = 0.02;
+
 // The strict confirmation rule is implemented identically in three reference
 // paths (mispricing_confirm, boost_legs, boost_mix). These two constants keep
 // that rule in lockstep so tightening it in one place can never silently leave

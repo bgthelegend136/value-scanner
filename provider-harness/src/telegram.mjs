@@ -1,5 +1,10 @@
 import { chooseBookmakerLink } from "./mispricing_normalize.mjs";
-import { MIN_CONFIRMED_EV } from "./mispricing_thresholds.mjs";
+import {
+  KELLY_FRACTION,
+  MIN_CONFIRMED_EV,
+  STAKE_CAP_FRACTION,
+} from "./mispricing_thresholds.mjs";
+import { kellyStake } from "./staking.mjs";
 
 const CONFIRMED_PCT = (MIN_CONFIRMED_EV * 100).toFixed(0);
 
@@ -12,6 +17,20 @@ function pickLabel(candidate) {
 
 function percent(value) {
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+}
+
+// Suggested bankroll fraction from the conservative (minimum) confirmed edge,
+// sized by quarter-Kelly with a hard cap. Omitted when there is no positive edge
+// to stake on.
+function stakeLine(candidate, confirmation) {
+  const stake = kellyStake({
+    offeredOdds: candidate.offeredOdds,
+    edge: confirmation.minimumConfirmedEv,
+    fraction: KELLY_FRACTION,
+    cap: STAKE_CAP_FRACTION,
+  });
+  if (!(stake > 0)) return "";
+  return `Suggested stake: ${(stake * 100).toFixed(1)}% of bankroll (¼-Kelly)`;
 }
 
 // How decisively the edge beats the sharp books' own disagreement. Higher is
@@ -45,6 +64,7 @@ export function formatMispricingMessage(candidate, confirmation) {
     `Pinnacle fair: ${confirmation.pinnacleFairOdds.toFixed(2)} | EV: ${percent(confirmation.pinnacleEv)}`,
     `Consensus fair: ${confirmation.consensusFairOdds.toFixed(2)} | EV: ${percent(confirmation.consensusEv)} | ${confirmation.consensusBooks} books`,
     confidenceLine(confirmation),
+    stakeLine(candidate, confirmation),
     "",
     "Verify the displayed price and exact market before betting.",
     linkNote,

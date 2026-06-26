@@ -43,6 +43,16 @@ test("formats a Greece-time alert with the exact pick and verification warning",
   assert.match(text, /select the exact pick/);
 });
 
+test("suggests a quarter-Kelly stake from the conservative edge", () => {
+  // minimumConfirmedEv +5% at odds 2.40 -> f* = 0.05/1.40 = 0.0357,
+  // quarter-Kelly = 0.0089 -> 0.9% of bankroll (below the 2% cap).
+  const text = formatMispricingMessage(
+    { ...candidate, offeredOdds: 2.4 },
+    { ...confirmation, minimumConfirmedEv: 0.05 },
+  );
+  assert.match(text, /Suggested stake: 0\.9% of bankroll \(¼-Kelly\)/);
+});
+
 test("shows the edge-over-dispersion confidence when present", () => {
   const confident = formatMispricingMessage(candidate, { ...confirmation, edgeOverDispersion: 12.3 });
   assert.match(confident, /Edge confidence: 12\.3× the sharp books' disagreement/);
