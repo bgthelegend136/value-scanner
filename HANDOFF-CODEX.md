@@ -334,3 +334,37 @@ agents must keep it current and read it before acting.
 > `scan`, no Telegram); every alert needs Pinnacle + 3-book consensus; no scraping, no
 > auto-betting, no secrets in logs/commits; TDD, keep `node --test` green.
 > Task: <task>, related to backlog <P#>. When done, update WORKLOG + this §2 banner and commit.
+
+---
+
+## 10. Immediate next steps for Codex (as of 2026-06-26)
+
+Context: the paper-bet data engine is live. `scan`/`clv`/`settle` cover every
+in-season mapped league at a 2% edge; a `Bet-Paper-Scan` scheduled task runs
+`scan` + `clv` every 8 hours (paper only, no Telegram). The goal now is to grow a
+**measurable track record** and judge whether the 2-3% edge is real via CLV. Do
+these in order; all are free/cheap and must follow the §0 rules and TDD.
+
+1. **P4 — data-driven league + alias expansion (highest value).** As
+   `reports/paper-bets.csv` and `reports/scan-all-*.csv` grow, find leagues that
+   show up as candidates but stay unmapped while The Odds API actually lists them
+   (cross-check the live `/sports` active list). Add the pairs to
+   `config/multisport-map.json` and title aliases to `multisport_map.mjs`. This
+   widens the paper funnel without weakening any rule.
+2. **CLV trend report.** Add a `clv-report` command (or extend `clv`) that reads
+   `paper-bets.csv` and summarises **beat-rate and average CLV over time and per
+   `sportKey`** — not just the current capture. This is the metric the owner uses
+   to decide if the edge is real. Persist a small CSV/JSON summary under `reports/`.
+3. **Daily settle.** Pending paper bets need results. Either add a daily `settle`
+   scheduled task (mirror `install-paper-scan-task.ps1`, needs only THE_ODDS_API_KEY)
+   or extend the paper-scan runner to settle bets whose kickoff has passed.
+4. **Hold calibration until the data says so.** Do NOT lower the 10% Telegram
+   alert floor. Only after ~200 settled bets with CLV: if beat-rate stays clearly
+   above ~55% and average CLV is positive, propose a calibrated live-alert floor as
+   a SEPARATE, reviewed change with the data attached.
+5. **P3 (3rd reference provider) stays deprioritized** — the 2026-06-26 audit showed
+   the bottleneck is candidate EV before confirmation, not reference coverage.
+
+Owner quota note: The Odds API free tier is ~500 credits/month; each full `scan`
+≈ 20 credits. The 8-hour paper-scan burns ~60/day — fine for a ~3-day window, but
+the owner should disable/review `Bet-Paper-Scan` after the data-collection run.
