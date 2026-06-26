@@ -84,6 +84,32 @@ test("settle updates completed bets and prints realized ROI", async () => {
   assert.doesNotMatch(await readFile(join(reportsDir, "paper-bets.csv"), "utf8"), new RegExp(KEY));
 });
 
+test("settle fetches scores for every pending league", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "settle-multi-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ sportKey: "soccer_fifa_world_cup" }),
+    paperRow({ referenceEventId: "br1", bettableEventId: "222", homeTeam: "Goias", awayTeam: "Coritiba", outcome: "1", sportKey: "soccer_brazil_serie_b" }),
+  ], PAPER_COLUMNS);
+  const scoresBySport = {
+    soccer_fifa_world_cup: [{ id: "ref1", completed: true, home_team: "Spain", away_team: "Cape Verde", scores: [{ name: "Spain", score: "1" }, { name: "Cape Verde", score: "1" }], last_update: "2026-06-25T20:00:00Z" }],
+    soccer_brazil_serie_b: [{ id: "br1", completed: true, home_team: "Goias", away_team: "Coritiba", scores: [{ name: "Goias", score: "2" }, { name: "Coritiba", score: "0" }], last_update: "2026-06-25T20:00:00Z" }],
+  };
+  const calls = [];
+  const code = await runCli(["settle"], {
+    out: () => {}, err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getScores(args) { calls.push(args.sportKey); return { data: scoresBySport[args.sportKey], quota: { remaining: 490 } }; },
+    }),
+    reportsDir, now: () => new Date("2026-06-25T20:05:00Z"),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual([...calls].sort(), ["soccer_brazil_serie_b", "soccer_fifa_world_cup"]);
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows.find((r) => r.referenceEventId === "ref1").status, "WON");
+  assert.equal(rows.find((r) => r.referenceEventId === "br1").status, "WON");
+});
+
 test("settle avoids quota when the ledger is absent or has no pending bets", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "settle-empty-"));
   let calls = 0;

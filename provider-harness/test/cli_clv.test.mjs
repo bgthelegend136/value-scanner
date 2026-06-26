@@ -94,6 +94,36 @@ test("clv captures closing line value for pending bets", async () => {
   assert.doesNotMatch(await readFile(join(reportsDir, "paper-bets.csv"), "utf8"), new RegExp(KEY));
 });
 
+test("clv queries each pending league's closing line and merges them", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-multi-"));
+  const brClosing = [{
+    id: "br1", sport_title: "Brazil Serie B", commence_time: "2026-06-26T22:00:00Z",
+    home_team: "Goias", away_team: "Coritiba",
+    bookmakers: [{ key: "pinnacle", title: "Pinnacle", last_update: "2026-06-26T21:55:00Z", markets: [{ key: "h2h", last_update: "2026-06-26T21:55:00Z", outcomes: [
+      { name: "Goias", price: 1.30 }, { name: "Coritiba", price: 12.0 }, { name: "Draw", price: 6.00 }] }] }],
+  }];
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ sportKey: "soccer_fifa_world_cup" }),
+    paperRow({ referenceEventId: "br1", bettableEventId: "222", homeTeam: "Goias", awayTeam: "Coritiba", kickoffUtc: "2026-06-26T22:00:00.000Z", sportKey: "soccer_brazil_serie_b" }),
+  ], PAPER_COLUMNS);
+  const calls = [];
+  const code = await runCli(["clv"], {
+    out: () => {}, err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getOdds(args) {
+        calls.push(args.sportKey);
+        return { data: args.sportKey === "soccer_brazil_serie_b" ? brClosing : closingOdds, receivedAt: "2026-06-26T21:55:00.000Z", quota: { remaining: 490 } };
+      },
+    }),
+    reportsDir, now: () => new Date("2026-06-26T21:55:00.000Z"),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual([...calls].sort(), ["soccer_brazil_serie_b", "soccer_fifa_world_cup"]);
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  for (const row of rows) assert.notEqual(row.clv, "");
+});
+
 test("clv spends no quota with no ledger or no pending bets", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "clv-empty-"));
   let calls = 0;

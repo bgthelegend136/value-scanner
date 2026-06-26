@@ -20,6 +20,7 @@ import {
   applyClosingLine,
   findStalePending,
   mergePaperBets,
+  paperSportKey,
   settlePaperBets,
   summarizeClv,
   summarizePaperBets,
@@ -38,8 +39,6 @@ import { analyzeBoostMix, parseMixLeg, priceMixLeg } from "./boost_mix.mjs";
 const execFileAsync = promisify(execFile);
 
 const TARGET_BOOKMAKERS = ["Superbet", "Stoiximan"];
-const WORLD_CUP_SPORT_KEY = "soccer_fifa_world_cup";
-const WORLD_CUP_LEAGUE_SLUG = "international-fifa-world-cup";
 const REFERENCE_BOOKMAKER = "pinnacle";
 const SCAN_COLUMNS = [
   "bookmaker", "eventId", "kickoffUtc", "homeTeam", "awayTeam",
@@ -483,11 +482,18 @@ async function runSettle({
   }
 
   const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
-  const response = await client.getScores({
-    sportKey: WORLD_CUP_SPORT_KEY,
-    daysFrom: 3,
-  });
-  const settled = settlePaperBets(rows, response.data ?? []);
+  // Settle across every league with a pending bet: fetch each sport's scores.
+  const pendingSportKeys = new Set(
+    rows.filter((row) => row.status === "PENDING").map(paperSportKey),
+  );
+  const scoreEvents = [];
+  let quotaRemaining;
+  for (const sportKey of pendingSportKeys) {
+    const response = await client.getScores({ sportKey, daysFrom: 3 });
+    quotaRemaining = response.quota?.remaining ?? quotaRemaining;
+    scoreEvents.push(...(response.data ?? []));
+  }
+  const settled = settlePaperBets(rows, scoreEvents);
   await writeCsv(ledgerPath, settled, PAPER_COLUMNS);
   printPaperSummary(out, settled);
 
@@ -498,7 +504,7 @@ async function runSettle({
       "is older than 3 days and may be outside the free scores window.\n",
     );
   }
-  out(`The Odds API quota remaining: ${response.quota?.remaining ?? "?"}\n`);
+  out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
   return 0;
 }
 
@@ -533,8 +539,20 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
   }
 
   const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
-  const response = await client.getOdds({ sportKey: WORLD_CUP_SPORT_KEY });
-  const closing = closingFairByKey(response.data ?? [], response.receivedAt);
+  // Pending bets can now span many leagues, so query each pending sport's
+  // closing line and merge them (event ids are unique across sports).
+  const pendingSportKeys = new Set(
+    rows.filter((row) => row.status === "PENDING").map(paperSportKey),
+  );
+  const closing = new Map();
+  let quotaRemaining;
+  for (const sportKey of pendingSportKeys) {
+    const response = await client.getOdds({ sportKey });
+    quotaRemaining = response.quota?.remaining ?? quotaRemaining;
+    for (const [key, probability] of closingFairByKey(response.data ?? [], response.receivedAt)) {
+      closing.set(key, probability);
+    }
+  }
   const updated = applyClosingLine(rows, closing, { capturedAt: now().toISOString() });
   await writeCsv(ledgerPath, updated, PAPER_COLUMNS);
 
@@ -549,7 +567,7 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
       `Average CLV: ${averageClv}`,
     ].join("\n") + "\n",
   );
-  out(`The Odds API quota remaining: ${response.quota?.remaining ?? "?"}\n`);
+  out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
   return 0;
 }
 
