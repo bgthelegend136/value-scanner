@@ -41,6 +41,14 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 > at `2026-06-27 00:00`. Latest no-quota `clv-report`: 15 captured CLV rows,
 > 14 positive, beat rate 93.3%, average CLV +2.2%. Latest live The Odds API
 > quota check: 314 remaining / 186 used, with `/sports` costing 0 credits.
+> **Status update 2026-06-26 (Codex P4/data check).** P4 data audit found only
+> two true `UNMAPPED_SPORT_LEAGUE` groups in the live alert path:
+> `football|chile-copa-chile-group-c` (6 rows) and
+> `football|new-zealand-southern-league` (2 rows). Current The Odds API active
+> `/sports` list does not expose matching Chile Copa Chile or New Zealand
+> Southern League keys, so no mapping was added. Live scanner has now sent 2
+> strict confirmed Telegram alerts today; `mispricing-clv` captured both, with
+> 1/2 positive and average CLV +12.1%. Latest quota observed: 311 remaining.
 > **Status update 2026-06-26 (Codex paper-settle scheduler).** Added daily paper
 > settlement scripts: `scripts/run-paper-settle.ps1` and
 > `scripts/install-paper-settle-task.ps1`. The runner executes `node src/cli.mjs
