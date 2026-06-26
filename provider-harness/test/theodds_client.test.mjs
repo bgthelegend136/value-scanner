@@ -134,3 +134,35 @@ test("filters odds by event ids and can request links", async () => {
   assert.equal(url.searchParams.get("eventIds"), "a,b");
   assert.equal(url.searchParams.get("includeLinks"), "true");
 });
+
+test("calls the event odds endpoint for additional markets", async () => {
+  const urls = [];
+  const client = createTheOddsApiClient({
+    apiKey: "secret",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonResponse({ id: "evt-1" }, {
+        headers: {
+          "x-requests-remaining": "441",
+          "x-requests-used": "59",
+          "x-requests-last": "6",
+        },
+      });
+    },
+  });
+
+  const response = await client.getEventOdds({
+    sportKey: "soccer_fifa_world_cup",
+    eventId: "evt-1",
+    markets: "btts,double_chance,team_totals",
+  });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/v4/sports/soccer_fifa_world_cup/events/evt-1/odds");
+  assert.equal(url.searchParams.get("apiKey"), "secret");
+  assert.equal(url.searchParams.get("regions"), "eu");
+  assert.equal(url.searchParams.get("markets"), "btts,double_chance,team_totals");
+  assert.equal(url.searchParams.get("oddsFormat"), "decimal");
+  assert.deepEqual(response.data, { id: "evt-1" });
+  assert.deepEqual(response.quota, { remaining: 441, used: 59, lastCost: 6 });
+});

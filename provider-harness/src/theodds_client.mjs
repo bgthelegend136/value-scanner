@@ -54,6 +54,15 @@ export function createTheOddsApiClient({
       if (includeLinks) parameters.includeLinks = true;
       return request(`/sports/${sportKey}/odds`, parameters);
     },
+    getEventOdds({
+      sportKey,
+      eventId,
+      regions = "eu",
+      markets,
+      oddsFormat = "decimal",
+    }) {
+      return request(`/sports/${sportKey}/events/${eventId}/odds`, { regions, markets, oddsFormat });
+    },
     getScores({ sportKey, daysFrom = 3, dateFormat = "iso" }) {
       return request(`/sports/${sportKey}/scores`, { daysFrom, dateFormat });
     },

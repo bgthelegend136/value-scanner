@@ -32,6 +32,7 @@ import { runMispricingScan } from "./mispricing_scan.mjs";
 import { matchCandidateEvent } from "./mispricing_match.mjs";
 import { confirmCandidate } from "./mispricing_confirm.mjs";
 import { parseLegPick, legFairProbabilities } from "./boost_legs.mjs";
+import { analyzeBoostMix, parseMixLeg, priceMixLeg } from "./boost_mix.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -682,13 +683,74 @@ async function priceBoostLeg(client, leg, now) {
   };
 }
 
+function marketsForMixSpec(spec) {
+  if (spec.market === "MATCH_RESULT") return "h2h";
+  if (spec.market === "DOUBLE_CHANCE") return "h2h,double_chance";
+  if (spec.market === "TOTALS") return "totals,alternate_totals";
+  if (spec.market === "BTTS") return "btts";
+  if (spec.market === "TEAM_TOTALS") return "team_totals,alternate_team_totals";
+  if (spec.market === "CORNERS_TOTALS") return "alternate_totals_corners";
+  if (spec.market === "CARDS_SPREAD") return "alternate_spreads_cards";
+  if (spec.market === "PLAYER_GOALSCORER") return "player_goal_scorer_anytime";
+  if (spec.market === "PLAYER_SHOTS") return "player_shots";
+  if (spec.market === "PLAYER_SHOTS_ON_TARGET") return "player_shots_on_target";
+  return "h2h";
+}
+
+async function priceBoostMixLeg(client, leg, now) {
+  const spec = parseMixLeg(leg.pick);
+  if (!spec) return { status: "UNVERIFIABLE", reason: "UNSUPPORTED_LEG", leg };
+  const candidate = {
+    kickoffUtc: new Date(leg.date).toISOString(),
+    participantOne: leg.home,
+    participantTwo: leg.away,
+  };
+  const events = await client.listEvents({ sportKey: leg.sportKey });
+  const match = matchCandidateEvent(candidate, events.data ?? []);
+  if (!match.event) return { status: "UNVERIFIABLE", reason: match.reason, leg, spec };
+  const odds = await client.getEventOdds({
+    sportKey: leg.sportKey,
+    eventId: String(match.event.id),
+    markets: marketsForMixSpec(spec),
+  });
+  const eventPayload = Array.isArray(odds.data) ? odds.data : [odds.data];
+  const selections = normalizeTheOddsResponse(eventPayload, odds.receivedAt);
+  return {
+    ...priceMixLeg(selections, match.event.id, spec, { now: now() }),
+    leg,
+    quota: odds.quota?.remaining,
+  };
+}
+
 function parseLegs(rest) {
   return rest
     .filter((arg) => arg.startsWith("--leg="))
     .map((arg) => {
       const [sportKey, home, away, date, pick] = arg.slice("--leg=".length).split(";");
-      return { sportKey, home, away, date, pick: String(pick ?? "").toUpperCase() };
+      return { sportKey, home, away, date, pick: String(pick ?? "") };
     });
+}
+
+// Both boost commands price a parlay as the *product* of each leg's de-vigged
+// fair probability, which assumes the legs are independent. That holds across
+// different fixtures, but Bet Builder boosts routinely stack legs from the same
+// match (e.g. Over 2.5 + BTTS), whose outcomes are correlated. We can't recover
+// that correlation from one-sided sharp prices, so we surface it: the combined
+// EV for any same-event group is an independence approximation, not a true price.
+function sameEventLegWarning(legs) {
+  const groups = new Map();
+  legs.forEach((leg, index) => {
+    const key = [leg.sportKey, leg.home, leg.away, leg.date]
+      .map((part) => String(part ?? "").trim().toLowerCase())
+      .join("|");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(index + 1);
+  });
+  const correlated = [...groups.values()].filter((indices) => indices.length > 1);
+  if (correlated.length === 0) return "";
+  const groupsText = correlated.map((indices) => `legs ${indices.join("+")}`).join(", ");
+  return `Note: ${groupsText} are on the same event and are priced as independent; ` +
+    "real correlation is not modeled, so the combined EV is approximate.\n";
 }
 
 // Price a multi-leg boosted parlay (e.g. a Stoiximan Bet Builder boost) against
@@ -711,6 +773,8 @@ async function runBoostCombo(rest, { loadTheOddsKey, createTheOddsClient, out, e
 
   const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
   out(`Boost combo: ${legs.length} legs @ ${boosted}\n`);
+  const correlationNote = sameEventLegWarning(legs);
+  if (correlationNote) out(correlationNote);
 
   const priced = [];
   let quota = "?";
@@ -741,6 +805,60 @@ async function runBoostCombo(rest, { loadTheOddsKey, createTheOddsClient, out, e
   out(`Consensus fair odds (combo): ${(1 / comboConsensus).toFixed(2)} (EV ${signed(evConsensus * 100, 1)}%)\n`);
   const positive = evPinnacle > 0 && evConsensus > 0;
   out(`Verdict: ${positive ? "+EV — both sharp references agree" : "Not +EV"}\n`);
+  out(`The Odds API quota remaining: ${quota}\n`);
+  return 0;
+}
+
+async function runBoostMix(rest, { loadTheOddsKey, createTheOddsClient, out, err, now }) {
+  const boosted = Number(flag(rest, "boost"));
+  const legs = parseLegs(rest);
+  if (!Number.isFinite(boosted) || boosted <= 1 || legs.length < 2) {
+    err('usage: boost-mix --boost=ODDS --leg="sportKey;home;away;date;pick" --leg=... (>=2 legs)\n');
+    return 1;
+  }
+  for (const leg of legs) {
+    if (!leg.sportKey || !leg.home || !leg.away || !leg.date ||
+      !Number.isFinite(new Date(leg.date).getTime())) {
+      err('boost-mix: each --leg needs "sportKey;home;away;date;pick"\n');
+      return 1;
+    }
+  }
+
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  out(`Boost mix: ${legs.length} legs @ ${boosted}\n`);
+  const correlationNote = sameEventLegWarning(legs);
+  if (correlationNote) out(correlationNote);
+
+  const priced = [];
+  let quota = "?";
+  for (const leg of legs) {
+    const result = await priceBoostMixLeg(client, leg, now);
+    if (result.quota !== undefined) quota = result.quota;
+    priced.push(result);
+  }
+
+  priced.forEach((p, index) => {
+    const label = `Leg ${index + 1}: ${p.leg.home} vs ${p.leg.away} pick ${p.leg.pick}`;
+    if (p.status === "VERIFIED") {
+      out(`  ${label} - VERIFIED, fair ${(1 / p.pinnacleFairProbability).toFixed(2)} Pinnacle / ${(1 / p.consensusFairProbability).toFixed(2)} consensus\n`);
+    } else if (p.status === "ESTIMATE_ONLY") {
+      out(`  ${label} - estimate only, fair about ${(1 / p.estimateProbability).toFixed(2)} (${p.reason})\n`);
+    } else {
+      out(`  ${label} - unverified (${p.reason})\n`);
+    }
+  });
+
+  const analysis = analyzeBoostMix({ boostedOdds: boosted, legResults: priced });
+  out(`Status: ${analysis.status}\n`);
+  if (analysis.status === "FULLY_VERIFIED") {
+    out(`Pinnacle fair odds: ${analysis.pinnacleFairOdds.toFixed(2)} (EV ${signed(analysis.pinnacleEv * 100, 1)}%)\n`);
+    out(`Consensus fair odds: ${analysis.consensusFairOdds.toFixed(2)} (EV ${signed(analysis.consensusEv * 100, 1)}%)\n`);
+  } else if (analysis.status === "MIXED_ESTIMATE") {
+    out(`Estimated fair odds: ${analysis.estimatedFairOdds.toFixed(2)} (EV ${signed(analysis.estimatedEv * 100, 1)}%)\n`);
+    out("Warning: estimate only legs are not strict verified value and must not be used for alerts.\n");
+  } else {
+    out("Combo cannot be priced: at least one leg is unsupported or has no usable reference.\n");
+  }
   out(`The Odds API quota remaining: ${quota}\n`);
   return 0;
 }
@@ -874,6 +992,11 @@ export async function runCli(argv, deps = {}) {
         loadTheOddsKey, createTheOddsClient, out, err, now,
       });
     }
+    if (command === "boost-mix") {
+      return await runBoostMix(rest, {
+        loadTheOddsKey, createTheOddsClient, out, err, now,
+      });
+    }
     if (command === "evaluate") {
       const csvPath = rest[0];
       if (!csvPath) {
@@ -919,7 +1042,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

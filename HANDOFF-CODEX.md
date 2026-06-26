@@ -1,46 +1,60 @@
-# Handoff → Codex: Multi-Sport Mispricing Telegram Alerts
+# Handoff to Codex: Multi-Sport Mispricing Telegram Alerts
 
-**Date:** 2026-06-26
-**Branch:** `codex/multisport-mispricing-alerts`
-**Working dir for all commands:** `provider-harness/`
-**Runtime:** Node.js ≥ 22, ES modules, built-in `fetch`, `node:test`. **No runtime npm dependencies** — keep it that way.
+**Date:** 2026-06-26  
+**Branch:** `codex/multisport-mispricing-alerts`  
+**Repo root:** `C:\Users\bgthe\Documents\bet\.worktrees\multisport-mispricing-alerts`  
+**Working dir for commands:** `provider-harness/`  
+**Runtime:** Node.js >= 22, ES modules, built-in `fetch`, `node:test`. No runtime npm dependencies.
 
 ---
 
-## 0. HARD CONSTRAINTS — non-negotiable, read first
+## 0. Hard constraints
 
-These are safety rules from the project owner. They override any convenience or feature goal. **Do not violate them, do not "temporarily" relax them in a test, do not work around them.**
+These are project-owner safety rules. They override convenience and feature goals.
 
-1. **Never send a betting alert based only on Odds-API.io's EV.** Every alert MUST pass independent dual confirmation against The Odds API (Pinnacle EV > floor **AND** 3-book median consensus EV > floor). Fail closed: if confirmation data is missing, send nothing.
-2. **Never scrape, log in, place a bet, fabricate a bookmaker URL, or expose any API key/token.**
-3. **Accept only HTTPS deep links on the explicit Stoiximan/Superbet domain allowlists** (see `mispricing_normalize.mjs` → `ALLOWED_HOSTS`). Anything off-allowlist becomes an empty link, never a guessed URL.
-4. **Secrets** — `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ODDS_API_IO_KEY`, `THE_ODDS_API_KEY` — must **never** be printed, written to `reports/`, included in an error message/stack, or committed. They live only in `.env.local` (gitignored). The Telegram client already wraps network errors so the token in the URL never leaks (`telegram.mjs`); preserve that pattern.
+1. Never send a betting alert based only on Odds-API.io EV. Every alert must pass independent dual confirmation against The Odds API: Pinnacle fair probability plus 3-book consensus EV over the floor. If confirmation data is missing, send nothing.
+2. Never scrape, log in, place a bet, fabricate a bookmaker URL, or expose any API key/token.
+3. Accept only HTTPS deep links on the explicit Stoiximan/Superbet domain allowlists in `src/mispricing_normalize.mjs`. Anything else becomes an empty link, never a guessed URL.
+4. Secrets (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ODDS_API_IO_KEY`, `THE_ODDS_API_KEY`) must never be printed, written to reports, included in errors/stacks, or committed. They live only in `.env.local` files.
+5. Estimated boost legs are manual-analysis only. Do not send alerts from estimated legs.
 
-If a task seems to require breaking one of these, stop and flag it instead.
+If a task appears to require breaking one of these, stop and flag it.
 
 ---
 
 ## 1. Mission
 
-Detect **bookmaker pricing mistakes** (≈10–20% edges) on **Stoiximan** and **Superbet**, independently confirm each against sharp reference odds (Pinnacle + consensus via The Odds API), and push only confirmed opportunities to Telegram. This is a personal, defensive analytics tool — it *finds and reports* mistakes; the human decides and bets manually.
+Detect bookmaker pricing mistakes on Stoiximan and Superbet, independently confirm them against sharp reference odds, and push only confirmed opportunities to Telegram. The human decides and bets manually.
 
-**Scope (v1, deliberately narrow):** Stoiximan + Superbet only; `MATCH_RESULT` (1X2 / moneyline) market only; EV floor **10%** (`mispricing_thresholds.mjs`).
+Current automated alert scope remains deliberately narrow: Stoiximan + Superbet, `MATCH_RESULT` only, 10% EV floor in `src/mispricing_thresholds.mjs`.
+
+Boost tooling is a manual decision aid. It may analyze wider markets, but it must label confidence explicitly and must not feed Telegram alerts unless every leg is fully verified under the strict rule.
 
 ---
 
-## 2. Current state (what already works)
+## 2. Current state
 
-- **All tests green:** `node --test` → **141/141** passing.
-- **2026-06-26 — P1 (CLV feedback loop) shipped** on this branch (see §6). Sent alerts are now snapshotted to `reports/mispricing-clv.csv`; the new `mispricing-clv` command captures the Pinnacle closing line and reports realized CLV. Live capture against The Odds API is not yet scheduled.
-- **2026-06-26 — P2 (two-tier cadence) shipped** (see §6). `runMispricingScan` now exits before any reference call on a no-op cycle (zero Pinnacle credits), and the production installer repeats every 15 minutes instead of 3×/day. Not yet registered on the machine.
-- **2026-06-26 — P6 (boost evaluation) shipped, partial** (see §6). New `boost-check` command prices a user-supplied Stoiximan/Superbet enhanced-odds (Ενισχυμένες Αποδόσεις) selection against real de-vigged Pinnacle + consensus odds, replacing the offline `boost` calculator's assumed margin. MATCH_RESULT single picks only so far; combos/totals pending.
-- **Live-verified end to end:**
-  - `node src/cli.mjs telegram-test` → real message delivered to the owner's chat.
-  - `node src/cli.mjs mispricing-scan --dry-run` → runs against both real APIs, fail-closed behavior confirmed (finds candidates, refuses to alert when confirmation data is absent).
-- **Latest live funnel (2026-06-26):** 95 raw candidates → distribution `≥20%: 0 | 10–20%: 1 | 5–10%: 10 | 0–5%: 66`. The single 10–20% candidate was correctly dropped as `STALE_CANDIDATE`. Net: 0 confirmed, 0 sent. The pipeline is behaving correctly; opportunities are simply rare/fleeting.
-- **Schedulers:** installer scripts exist (`scripts/install-mispricing-task.ps1` for the every-15-min production scanner; `scripts/install-mispricing-funnel-task.ps1` for the read-only sampler). The production scanner has **not** been registered on the machine yet — that is the owner's call.
+- All tests were green after the latest boost-mix work: `npm test` / `node --test` -> 152/152 passing.
+- P1 CLV feedback loop is shipped. Sent alerts are snapshotted to `reports/mispricing-clv.csv`; `mispricing-clv` captures Pinnacle closing line and reports realized CLV. Scheduling CLV capture is still open.
+- P2 two-tier cadence is shipped. `runMispricingScan` exits before any reference call on no-op cycles, so empty cycles spend zero The Odds API credits. The production installer repeats every 15 minutes but is not registered on the machine.
+- P6 boost evaluation is shipped for manual use: `boost-check`, `boost-combo`, and `boost-mix`.
+- P7 event-level reference support exists for manual boost analysis only. Automated alerting has not been widened beyond `MATCH_RESULT`.
+- Live Telegram path was previously verified end to end with `telegram-test`; live dry-run scan was also verified fail-closed.
+- Latest live funnel before this handoff still produced 0 confirmed alerts. That is expected: confirmed 10%+ opportunities are rare/fleeting and missing reference coverage rejects candidates.
+- The working tree currently has uncommitted boost-mix changes. Do not revert existing files unless explicitly asked.
 
-The working tree on this branch is clean and committed. Do not revert existing files unless explicitly asked.
+Uncommitted boost-mix work currently includes:
+
+- `provider-harness/src/theodds_client.mjs`
+- `provider-harness/src/theodds_normalize.mjs`
+- `provider-harness/src/boost_mix.mjs`
+- `provider-harness/src/cli.mjs`
+- `provider-harness/test/theodds_client.test.mjs`
+- `provider-harness/test/theodds_normalize.test.mjs`
+- `provider-harness/test/boost_mix.test.mjs`
+- `provider-harness/test/cli_boost_mix.test.mjs`
+- `docs/superpowers/plans/2026-06-26-boost-mix-exotic-markets.md`
+- this handoff file
 
 ---
 
@@ -49,161 +63,209 @@ The working tree on this branch is clean and committed. Do not revert existing f
 ```bash
 cd provider-harness
 
-# All tests (this is the gate — must stay green)
+# All tests
+npm test
+
+# Same gate if npm script is unavailable
 node --test
 
-# Live dry-run scan (queries both APIs, sends NOTHING to Telegram)
+# Live dry-run scan: queries APIs, sends nothing to Telegram
 node src/cli.mjs mispricing-scan --dry-run
 
-# Live scan (will send Telegram alerts if anything confirms)
+# Live scan: sends Telegram alerts only if strict confirmation passes
 node src/cli.mjs mispricing-scan
 
-# Capture closing-line value for already-sent alerts (run near/after kickoff)
+# Capture closing-line value for already-sent alerts
 node src/cli.mjs mispricing-clv
 
-# Price a boost the user is looking at, against real sharp odds
+# Price a single enhanced-odds 1X2 selection
 node src/cli.mjs boost-check --sport-key=soccer_fifa_world_cup --home="Japan" --away="Sweden" --date=2026-06-26T18:30:00Z --pick=1 --base=1.78 --boost=2.40
 
-# Price a multi-leg (Bet Builder) boost: product of each leg's fair probability
+# Price a strict multi-leg combo using only verified legs
 node src/cli.mjs boost-combo --boost=2.50 --leg="soccer_fifa_world_cup;Japan;Sweden;2026-06-26T18:30:00Z;2" --leg="soccer_fifa_world_cup;Brazil;Serbia;2026-06-26T21:00:00Z;1"
+
+# Price an exotic boosted mix. API-backed legs get VERIFIED; unsupported one-sided/missing-reference legs get ESTIMATE_ONLY or UNVERIFIABLE.
+node src/cli.mjs boost-mix --boost=1.90 --leg="soccer_fifa_world_cup;Turkey;USA;2026-06-26T02:00:00Z;BTTS_YES" --leg="soccer_fifa_world_cup;Turkey;USA;2026-06-26T02:00:00Z;O2.5"
 
 # Verify Telegram delivery path
 node src/cli.mjs telegram-test
 
-# EV-distribution instrument (no Telegram, optional --append-csv)
+# EV-distribution instrument; no Telegram
 node scripts/mispricing-funnel.mjs
 ```
 
-**Env setup:** copy `.env.example` → `.env.local` (repo root or harness root; the installer searches both, including the main repo root when run from a worktree). Required keys:
-```
-ODDS_API_IO_KEY=      # Odds-API.io (the soft-book value feed)
-THE_ODDS_API_KEY=     # The Odds API (sharp reference: Pinnacle + consensus)
+Environment setup: copy `.env.example` to `.env.local` in the repo root or harness root. Required keys:
+
+```bash
+ODDS_API_IO_KEY=
+THE_ODDS_API_KEY=
 TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=     # the human's chat id, NOT the bot's own id
+TELEGRAM_CHAT_ID=
 ```
+
+Do not print these values.
 
 ---
 
-## 4. Architecture — pipeline & file map
+## 4. Architecture and file map
 
-Data flows in stages; **every stage fails closed** (on doubt, reject/defer, never alert):
+Every production alert stage fails closed:
 
-```
-Odds-API.io /value-bets ──► normalize ──► map sport ──► match event ──► confirm (The Odds API) ──► dedup/state ──► Telegram
-   (Stoiximan, Superbet)        │            │             │                  │                        │            │
+```text
+Odds-API.io value-bets
+  -> normalize
+  -> map sport
+  -> match event
+  -> confirm with The Odds API
+  -> dedup/state
+  -> Telegram
 ```
 
 | Stage | File | Responsibility |
-|-------|------|----------------|
-| Provider client | `src/value_bets_client.mjs` | Pulls `/value-bets` per bookmaker; captures `receivedAt` + rate-limit headers. |
-| Normalize | `src/mispricing_normalize.mjs` | EV floor, freshness, market shape, participant/link safety. **Bookmaker + host allowlists live here.** |
-| Sport mapping | `src/multisport_map.mjs` + `config/multisport-map.json` | Maps provider `sport|league` → The Odds API sport key. Static registry first, then exact-title auto-map against active sports. |
-| Event match | `src/mispricing_match.mjs` | Matches a candidate to a reference event by normalized team names + kickoff tolerance (120s). Rejects on no/ambiguous match. |
-| Reference client | `src/theodds_client.mjs` | `listSports`, `listEvents`, `getOdds` (uses `markets=h2h` only → 1 credit/sport). |
-| Reference normalize | `src/theodds_normalize.mjs` | Shapes The Odds API odds into selections. |
-| Confirm | `src/mispricing_confirm.mjs` | Power de-vig; **Pinnacle EV AND 3-book consensus EV both > floor** or REJECTED. |
-| Thresholds | `src/mispricing_thresholds.mjs` | Single source of truth: `MIN_CANDIDATE_EV`, `MIN_CONFIRMED_EV` (both 0.10). |
-| State / dedup | `src/mispricing_state.mjs` | Queue, delivered-alerts ledger, health counters, `shouldSendAlert` (≥5pp improvement to re-alert). |
-| Telegram | `src/telegram.mjs` | Formats message (Europe/Athens tz), inline keyboard; token-safe error wrapping. |
-| Orchestrator | `src/mispricing_scan.mjs` | Wires all stages; quota reserve (100); per-stage audit rows; `--dry-run`. |
-| CLI | `src/cli.mjs` | Command dispatch: `mispricing-scan`, `telegram-test`, plus existing `clv`, `settle`, `boost`, etc. |
-| Schedulers | `scripts/*.ps1` | Production scanner (09:00/15:00/21:00) + funnel sampler. |
+| --- | --- | --- |
+| Provider client | `src/value_bets_client.mjs` | Pulls `/value-bets` per bookmaker; captures receive time and rate-limit headers. |
+| Normalize | `src/mispricing_normalize.mjs` | EV floor, freshness, market shape, participant/link safety. Bookmaker + host allowlists live here. |
+| Sport mapping | `src/multisport_map.mjs` + `config/multisport-map.json` | Maps provider `sport|league` to The Odds API sport key. |
+| Event match | `src/mispricing_match.mjs` | Matches candidates to reference events by normalized teams and kickoff tolerance. Rejects no/ambiguous matches. |
+| Reference client | `src/theodds_client.mjs` | `listSports`, `listEvents`, `getOdds`, and new `getEventOdds({ sportKey, eventId, markets })`. |
+| Reference normalize | `src/theodds_normalize.mjs` | Shapes The Odds API odds into selections, including event-level exotic markets used by `boost-mix`. |
+| Confirm | `src/mispricing_confirm.mjs` | Power de-vig; Pinnacle EV and 3-book consensus EV must both pass the floor. |
+| Boost legs | `src/boost_legs.mjs` | Strict `boost-combo` leg parsing/pricing for match result, double chance, and totals. |
+| Boost mix | `src/boost_mix.mjs` | Manual boosted-combo analysis with `FULLY_VERIFIED`, `MIXED_ESTIMATE`, or `UNVERIFIABLE` output. |
+| Thresholds | `src/mispricing_thresholds.mjs` | Single source of truth for EV floors. |
+| State/dedup | `src/mispricing_state.mjs` | Queue, delivered-alerts ledger, health counters, CLV ledger. |
+| Telegram | `src/telegram.mjs` | Formats alerts and wraps network errors without leaking tokens. |
+| Orchestrator | `src/mispricing_scan.mjs` | Wires scan stages; quota reserve; audit rows; dry-run. |
+| CLI | `src/cli.mjs` | Command dispatch: scan, CLV, Telegram test, boost tools, etc. |
+| Schedulers | `scripts/*.ps1` | Windows Task Scheduler installers for scan and funnel sampler. |
 
-State/artifacts are written under `reports/` (gitignored): `mispricing-audit.csv`, `mispricing-queue.csv`, `mispricing-alerts.csv`, `mispricing-clv.csv`, `mispricing-health.json`.
-
----
-
-## 5. Domain facts & gotchas (will bite you if you don't know)
-
-- **`expectedValue` from Odds-API.io is an INDEX ~100, not a percentage.** Fraction = `(value - 100) / 100`. Use exactly that form — `value/100 - 1` is float-fragile at the gate (`120/100 - 1 === 0.19999999999999996`). See `mispricing_normalize.mjs:128`.
-- **Float fragility at thresholds is real.** Re-alert check uses an epsilon: `improvement >= 0.05 - 1e-9` (`mispricing_state.mjs`). Keep epsilons when comparing summed/subtracted floats at a boundary.
-- **De-vig:** use the existing power method `devigPower` from `src/value.mjs`. Don't reinvent.
-- **The Odds API credit cost:** `markets=h2h` = 1 credit/sport; adding totals doubles it. v1 is MATCH_RESULT-only, so keep `h2h`. Quota reserve of 100 stops verification before exhausting the plan.
-- **Staleness window:** `MAX_AGE_MS = 10 min` in `mispricing_normalize.mjs`. A candidate whose `expectedValueUpdatedAt` is older than this is `STALE_CANDIDATE` (an EV from a stale price is fiction).
-- **PowerShell 5.1 scheduler gotcha:** `New-ScheduledTaskSettingsSet -StartWhenAvailable $true` passes a stray positional arg and fails at runtime (it's a **switch**). Use the bare switch: `-StartWhenAvailable`, `-WakeToRun`. Tests assert this (`/-StartWhenAvailable\b(?!\s+\$)/`).
-- **Superbet links** may resolve to `superbet.bet.br` (Brazil). Fine for *detection*; the human verifies market availability before betting. This domain is intentionally on the allowlist.
+State/artifacts are written under gitignored `reports/`: `mispricing-audit.csv`, `mispricing-queue.csv`, `mispricing-alerts.csv`, `mispricing-clv.csv`, `mispricing-health.json`.
 
 ---
 
-## 6. Prioritized backlog (the goals — do these in order)
+## 5. Domain facts and gotchas
 
-Each item lists the **why**, the **concrete change**, and **acceptance criteria**. Follow TDD: red test → green → refactor. Keep `node --test` at 100%.
-
-### P1 — Wire a feedback loop: CLV on every sent alert  ✅ **DONE (2026-06-26)**
-**Delivered on this branch.** Implementation summary so it isn't redone:
-- `mispricing_state.mjs` — new `CLV_LEDGER_COLUMNS`, `buildClvTrackingRow(candidate, confirmation, {sentAt})`, `mergeClvLedger(existing, incoming)` (dedup by alert identity), and `readClvLedger()` / `writeClvLedger()` over `reports/mispricing-clv.csv`.
-- `mispricing_scan.mjs` — on a successful send (not dry-run, not on Telegram failure) it appends a PENDING tracking row carrying `decimalOdds = offeredOdds`, `referenceEventId`, sport/market/line/outcome, kickoff, and the opening Pinnacle fair probability.
-- `cli.mjs` — new `mispricing-clv` command (`runMispricingClv`): groups PENDING alerts by sport, queries The Odds API once per sport (`markets=h2h`, limited to tracked `eventIds`), de-vigs Pinnacle, then reuses `applyClosingLine`/`summarizeClv` from `paper.mjs` and prints captured / positive / beat-rate / average CLV.
-- Tests: `mispricing_state.test.mjs` (+2), `cli_mispricing_clv.test.mjs` (+2), plus CLV assertions added to `mispricing_scan.test.mjs`. Suite 129/129.
-**Still open (small follow-ups, not blocking):** schedule `mispricing-clv` to run near kickoff (own PS task or fold into the runner); optionally also measure CLV against the consensus (not just Pinnacle).
-
-### P2 — Fix the cadence/latency mismatch  ✅ **DONE (2026-06-26)**
-**Delivered on this branch.** The scan is self-escalating, so detection and confirmation live in one process:
-- `mispricing_scan.mjs` — after normalization, when `discovered.length === 0 && existingQueue.length === 0` the run writes empty queue + health and returns **before** calling `listSports`/`listEvents`/`getOdds`. So a no-op 15-min cycle spends zero reference credits; only a fresh ≥10% candidate (or a still-queued one) reaches confirmation. The existing quota-reserve guard is unchanged.
-- `scripts/install-mispricing-task.ps1` — replaced the three daily `-At` triggers with a single `-Once` trigger repeating every 15 min (`New-TimeSpan -Minutes 15`, 3650-day duration to dodge the `[TimeSpan]::MaxValue` bug). `MultipleInstances IgnoreNew` already prevents overlap. Parse-verified; not yet registered.
-- Tests: `mispricing_scan.test.mjs` (+1, asserts a no-op cycle never calls any reference method) and `scheduler_scripts.test.mjs` (updated to assert the 15-min repetition). Suite 130/130.
-**Note:** detection cost is the Odds-API.io `/value-bets` calls (2/cycle ≈ 192/day) — the *cheap* feed; the early-exit is specifically about not spending Pinnacle/The-Odds-API credits on empty cycles.
-
-### P3 — Widen confirmation coverage (second sharp source)
-**Why:** Today confirmation depends 100% on The Odds API carrying the same league. The ≥10% mistakes keep landing in obscure leagues (e.g. Australian women's NPL) that it doesn't cover → 0 confirmable alerts. Single point of failure on coverage.
-**Change:** Add an optional second sharp reference (e.g. Betfair Exchange fair price) as an *alternative* confirmation when Pinnacle is unavailable for a fixture. Do **not** weaken the dual-confirmation rule — a second sharp source *substitutes* for the missing one, it doesn't lower the bar.
-**Acceptance:** When The Odds API lacks a fixture but the second source has it, confirmation can still run under the same EV floor. Behavior unchanged when both are present. Fail-closed preserved when neither is present.
-
-### P4 — Harden event matching (aliases + near-miss logging)
-**Why:** Matching requires an *exact* normalized team-name match + 120s tolerance. Spelling differences across providers ("Inter" vs "Internazionale", "Man Utd" vs "Manchester United") cause silent `NO_EVENT_MATCH` — you lose real opportunities and never know.
-**Change:** Add a small alias/normalization layer and **log near-misses** (same kickoff window, high name similarity, but not exact) to an audit channel so the alias table can be grown from real data. Keep ambiguous matches rejected (never guess between two events).
-**Acceptance:** Known alias pairs match; near-misses are logged with enough detail to triage; ambiguous (≥2 candidate events) still rejected.
-
-### P5 — Operational resilience
-**Why:** Runs on a single Windows PC via Task Scheduler. If it sleeps/off, no scans. (A health-warning after 3 consecutive provider failures exists, but doesn't help if the host itself is down.)
-**Change:** Add a heartbeat/"last successful run" signal the human can check, and document a path to host the scan off the single PC if desired. Lower priority — only after P1–P4.
-**Acceptance:** A missed/dead scanner is observable (e.g. stale heartbeat surfaced), not silent.
+- `expectedValue` from Odds-API.io is an index around 100, not a percentage. Fraction is `(value - 100) / 100`; keep the current implementation to avoid float gate errors.
+- Staleness matters. `MAX_AGE_MS = 10 min`; stale candidate EV is rejected.
+- Use the existing `devigPower` method from `src/value.mjs`; do not invent another de-vig method.
+- The Odds API credit cost grows with markets. `markets=h2h` is cheap; broad event-level market sets can be expensive. A recent live exotic-market check cost 14 credits, so use targeted market lists.
+- `double_chance` must be derived from de-vigged `MATCH_RESULT` probabilities, not by de-vigging the `double_chance` market directly. Double-chance outcomes overlap, so treating them as a normal mutually exclusive 3-way market is wrong.
+- One-sided player/scorer markets cannot be fully verified from a yes-only price. `boost-mix` may estimate them with per-market margins, but that remains `ESTIMATE_ONLY`.
+- The strict alert rule is unchanged: Pinnacle fair probability plus 3-book consensus, or no verified verdict.
+- Superbet links may resolve to `superbet.bet.br` for detection. The human verifies market availability before betting; allowlist behavior is intentional.
+- PowerShell 5.1 scheduler switch gotcha: `-StartWhenAvailable` and `-WakeToRun` are switches, not boolean args. Tests assert the scripts avoid the bad form.
 
 ---
 
-### P6 — Boost / enhanced-odds evaluation  ✅ **DONE (partial, 2026-06-26)**
-**Why:** Stoiximan/Superbet enhanced odds (Ενισχυμένες Αποδόσεις) are a prime source of mistakes and the owner's direct interest, but the offline `boost` calculator only guesses the market margin.
-**Delivered:** `cli.mjs` `boost-check` builds a synthetic MATCH_RESULT candidate from user-supplied boost details (no scraping — §0.2) and runs it through the real `confirmCandidate` dual confirmation, reporting Pinnacle & consensus fair odds + true EV + a verdict. Tests in `cli_boost_check.test.mjs` (+2).
-**Constraint reality:** fully *automatic* boost discovery is impossible without scraping the bookmaker site (forbidden). This is the supported model: the owner sees the boost, supplies it, the tool gives a rigorous verdict.
-**Combo support added (2026-06-26):** `boost-combo` prices a multi-leg parlay — fair combo probability = product of each leg's de-vigged fair probability, EV = boostedOdds × product − 1; fail-closed if any leg can't be priced. Helper `priceBoostLeg` in `cli.mjs`; tests in `cli_boost_combo.test.mjs`.
-**Leg market types added (2026-06-26):** `src/boost_legs.mjs` — `parseLegPick` + `legFairProbabilities` now price three leg kinds with the same Pinnacle+3-book consensus rule: **MATCH_RESULT** (1/X/2), **DOUBLE_CHANCE** (1X/12/X2, derived by summing the de-vigged 1X2 components — no new data), and **TOTALS** (O2.5/U2.5, from The Odds API `totals` market). Pure tests in `test/boost_legs.test.mjs`.
-**Still open — the owner's live screenshot:** that boost's second leg "Sweden Over 0.5 goals" is a **team total**, and the match was **live**. Team totals / BTTS are NOT in The Odds API h2h/totals → need another data source (own work item under P7), and live boosts need P8. For unsupported leg types `boost-combo` fails closed with `UNSUPPORTED_LEG_PICK`; tell the owner to use the offline `boost` calculator (assumed margins) and say it's an estimate.
+## 6. Backlog status
 
-### P7 — Markets beyond 1X2 (TOTALS, handicaps, props)
-**Why:** Bookmaker mistakes are *more* common in softer markets (over/under, team totals, cards, corners, player props) than in the sharp 1X2 line — the current pipeline ignores all of them.
-**Change:** Extend normalize/confirm to TOTALS first (The Odds API already returns `totals`; `theodds_normalize.mjs` already maps OVER/UNDER). Resolve the over/under direction the provider feed encodes (the original reason TOTALS was deferred), then widen `expectedOutcomes`/de-vig grouping. Keep dual confirmation and the EV floor.
-**Acceptance:** a TOTALS candidate confirms against Pinnacle+consensus on the exact line; ambiguous/มismatched lines fail closed.
+### P1 - CLV feedback loop: DONE
 
-### P8 — Live / in-play mistakes
-**Why:** The largest, most frequent mistakes happen in-play (laggy prices after a goal/card); the system is pre-match only.
-**Change:** Significant — needs a live odds source and a much faster loop. Scope and de-risk before building. Lowest priority until pre-match flow is proven to produce real, profitable alerts (watch the P1 CLV data first).
+Delivered:
+- `mispricing_state.mjs` ledger helpers for `reports/mispricing-clv.csv`
+- scan-time append of pending CLV rows after successful Telegram sends
+- `mispricing-clv` command to capture closing Pinnacle line
+- tests in `mispricing_state.test.mjs`, `cli_mispricing_clv.test.mjs`, and `mispricing_scan.test.mjs`
 
-## 7. Working agreement (definition of done)
+Still open: schedule CLV capture near kickoff; optionally add consensus CLV.
 
-- **TDD always:** write the failing test first, then the implementation. No new behavior without a test.
-- **`node --test` stays at 100%.** Don't merge red.
-- **Fail closed everywhere.** On missing/ambiguous/stale data: reject or defer, never alert. The cost of a missed bet is zero; the cost of a bad alert is the human's money.
-- **No new runtime dependencies.** Node built-ins only.
-- **No secrets in logs, reports, errors, or commits.** Audit/report CSVs are gitignored but still must not contain tokens.
-- **Single source of truth for thresholds:** change EV floors only in `mispricing_thresholds.mjs`.
-- **Commit style:** small, atomic, conventional (`feat:`, `fix:`, `test:`, `docs:`, `chore:`), each commit green.
-- Reference plan with deeper rationale: `docs/superpowers/plans/2026-06-25-multisport-mispricing-alerts.md` (see its "v1 Scope Decisions and Verified Schema" section).
+### P2 - Cadence/latency: DONE
+
+Delivered:
+- no-op cycles return before reference API calls
+- production task installer repeats every 15 minutes
+- tests for early exit and scheduler script
+
+The production scanner is not registered on the machine.
+
+### P3 - Wider confirmation coverage: OPEN
+
+Highest leverage for automated alert volume. Current confirmation depends on The Odds API carrying the same league/event. Add an optional second sharp reference source as a substitute when Pinnacle/The Odds API coverage is missing, without weakening dual confirmation or EV floors.
+
+### P4 - Event matching aliases and near-miss logging: OPEN
+
+Exact normalized team match plus kickoff tolerance misses real events with provider spelling differences. Add alias/normalization and near-miss logs, while keeping ambiguous matches rejected.
+
+### P5 - Operational resilience: OPEN
+
+Add observable heartbeat/last-success signal for the Windows scheduled scanner. Lower priority than P3/P4.
+
+### P6 - Boost/enhanced-odds evaluation: DONE for manual use
+
+Delivered:
+- `boost-check`: single 1X2 enhanced-odds candidate through real strict confirmation
+- `boost-combo`: strict multi-leg combo pricing; fails closed if any leg cannot be verified
+- `boost_legs.mjs`: match result, double chance, totals leg support
+- `boost-mix`: manual exotic boosted combo analysis with explicit confidence status
+
+`boost-mix` statuses:
+- `FULLY_VERIFIED`: every leg API-backed and verified under strict rule
+- `MIXED_ESTIMATE`: at least one leg is estimated; manual decision only
+- `UNVERIFIABLE`: missing/unsupported reference data prevents useful pricing
+
+Do not send alerts from `MIXED_ESTIMATE` or `UNVERIFIABLE`.
+
+### P7 - Markets beyond 1X2: PARTIAL
+
+Manual boost analysis now normalizes these event-level markets where The Odds API provides them:
+
+- `double_chance`
+- `btts`
+- `team_totals`
+- `alternate_team_totals`
+- `alternate_totals_corners`
+- `alternate_spreads_cards`
+- `player_goal_scorer_anytime`
+- `player_shots`
+- `player_shots_on_target`
+
+This is not wired into automated alerts. Before alerting on any market beyond `MATCH_RESULT`, add market-specific candidate normalization, exact line matching, Pinnacle+3-book consensus verification, audit rows, and tests.
+
+### P8 - Live/in-play mistakes: OPEN
+
+Likely where the biggest mistakes are, but needs a live odds source and faster loop. Scope before building. Keep pre-match flow and CLV data as the proof base first.
 
 ---
 
-## 8. First move for Codex
+## 7. Recent live manual checks
 
-Done so far: **P1** (CLV), **P2** (15-min two-tier cadence), **P6** (boost-check + boost-combo). Two live screenshots from the owner (Japan–Sweden boosts) show the **immediate** gap.
+Fixtures found under `soccer_fifa_world_cup`:
 
-There are two tracks; pick by intent:
+- Paraguay vs Australia, event `22f6ac06dfcc88a847920f62633e6459`, kickoff `2026-06-26T02:00:00Z`
+- Turkey vs USA, event `f41aeac9a8343a84b4950f15ea25fba2`, kickoff `2026-06-26T02:00:00Z`
 
-**Track A — finish the boost feature the owner is actively using (do this next).**
-The real boosts have **non-1X2 legs**: e.g. "Sweden win or draw" (double chance) + "Sweden Over 0.5 goals" (team total). `boost-combo` only prices 1/X/2 legs today. Implement **P7** starting with the two leg types those boosts use:
-1. **Double chance** (1X / 12 / X2): derive its fair probability by summing the relevant de-vigged 1X2 fair probs (already available from `devigPower`). No new feed needed.
-2. **Team totals / "team Over 0.5"** (= team to score ≥1): needs a market the reference carries; The Odds API h2h won't have it, so scope the data source first (it may not be available pre-match → may be P8/live-bound).
-   Start with double chance (pure, no new data) — write the failing test in `cli_boost_combo.test.mjs` for an X2 leg, extend `priceBoostLeg` to accept a leg `market` and compute the combined fair prob. Keep fail-closed for unsupported leg markets.
+Focused live check around `2026-06-26T01:52:39Z`:
 
-**Track B — highest leverage for alert volume overall: P3 (second sharp source).**
-The ≥10% mistakes land in leagues The Odds API doesn't carry, so confirmed alerts stay ~0. Add an *alternative* sharp reference (e.g. Betfair Exchange) that substitutes for Pinnacle when a fixture isn't covered — **without** lowering the EV floor or weakening dual confirmation (§0.1). Read `src/mispricing_confirm.mjs` + `src/theodds_client.mjs`; test first: a fixture absent from The Odds API but present in the second source still confirms under the same floor; unchanged when both present; fail-closed when neither.
+- Turkey @ 3.70: VERIFIED; Pinnacle EV about +13.5%, consensus EV about +11.2%. This was the cleanest strict candidate from the screenshots.
+- Paraguay-Australia Under 1.5 @ 2.22: VERIFIED but borderline; Pinnacle EV about +10.1%, consensus EV about +8.1%. It does not meet a strict 10% consensus floor.
+- Turkey-USA Over 2.5 component @ 1.90: VERIFIED but borderline; Pinnacle EV about +9.4%, consensus EV about +9.9%.
+- Turkey-USA BTTS Yes + Over 2.5 @ 1.90: `FULLY_VERIFIED` and strongly negative, about -33% EV. Avoid.
 
-How I (the previous session) would continue: double chance + match totals legs are **done** (`boost_legs.mjs`). The next leg type the owner needs is **team totals** ("team Over 0.5") — but The Odds API h2h/totals doesn't carry it, so the next step is **sourcing team-total / BTTS odds** (check The Odds API additional markets on the current plan, or a second provider). That's a *data* task, not a math task — scope it before coding. If team-total odds aren't obtainable pre-match, it collapses into P8 (live). Meanwhile **P3 (second sharp source)** remains the highest-leverage item for raising the (still ~0) confirmed-alert count.
+These are historical manual-analysis notes for the session, not alerts.
+
+---
+
+## 8. Working agreement
+
+- TDD for behavior changes: failing test first, then implementation.
+- Keep `node --test` / `npm test` green.
+- Fail closed on missing, ambiguous, stale, or unsupported data.
+- No new runtime dependencies unless the owner explicitly accepts that tradeoff.
+- No secrets in logs, reports, errors, or commits.
+- EV floors live only in `src/mispricing_thresholds.mjs`.
+- Keep commits small, atomic, and green if/when the owner asks for commits.
+- Deeper planning docs:
+  - `docs/superpowers/plans/2026-06-25-multisport-mispricing-alerts.md`
+  - `docs/superpowers/plans/2026-06-26-boost-mix-exotic-markets.md`
+
+---
+
+## 9. Recommended next moves
+
+1. Review the uncommitted boost-mix changes and commit them if the owner wants a checkpoint.
+2. Use `boost-mix` manually for screenshot boosts; trust only `FULLY_VERIFIED` for rigorous verdicts.
+3. Decide whether any exotic markets should graduate into automated alerts. Only two-sided, exact-line, Pinnacle+3-consensus markets should be considered.
+4. For alert volume, P3 remains the highest-leverage engineering task: add a second sharp reference source for events The Odds API/Pinnacle does not cover.
+5. P4 is the next reliability task: improve event matching with aliases and near-miss logs.
+
+Do not start by widening alert markets casually. The strict verification rule is the product boundary.
