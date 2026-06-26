@@ -308,3 +308,29 @@ These are historical manual-analysis notes for the session, not alerts.
 5. P4 is the next reliability task: improve event matching with aliases and near-miss logs.
 
 Do not start by widening alert markets casually. The strict verification rule is the product boundary.
+
+---
+
+## 9. Collaboration protocol (Claude ⇄ Codex)
+
+The owner alternates between two agents (Claude Code and Codex). Neither can see the
+other's private memory, so **this repo is the only shared source of truth.** Both
+agents must keep it current and read it before acting.
+
+### Shared source-of-truth files (read these first, every session, in order)
+1. `HANDOFF-CODEX.md` — §0 hard constraints, §2 Status-update banner (current state), §6 backlog.
+2. `provider-harness/WORKLOG-<newest date>.md` — exactly what changed last and why.
+3. `git log --oneline -15` — the real commits.
+
+### When you FINISH a piece of work (both agents must do this)
+- Append/create `provider-harness/WORKLOG-YYYY-MM-DD.md` (Greek, summary table + sections, reference commit hashes).
+- Update the §2 Status-update banner here with the new state.
+- Commit atomically with clear messages; report the commit hashes.
+
+### Template the owner pastes when handing a task to Codex
+> Before doing anything, read in order: (1) `HANDOFF-CODEX.md` §0/§2/§6, (2) the newest
+> `provider-harness/WORKLOG-*.md`, (3) `git log --oneline -15`. Confirm what changed last.
+> Hard rules: do NOT lower the 10% Telegram alert floor (the 2% floor is the paper-only
+> `scan`, no Telegram); every alert needs Pinnacle + 3-book consensus; no scraping, no
+> auto-betting, no secrets in logs/commits; TDD, keep `node --test` green.
+> Task: <task>, related to backlog <P#>. When done, update WORKLOG + this §2 banner and commit.
