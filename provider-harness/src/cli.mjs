@@ -45,7 +45,7 @@ import { fdCompetitionFor, synthesizeFdScoreEvents } from "./football_data_settl
 
 const execFileAsync = promisify(execFile);
 
-const TARGET_BOOKMAKERS = ["Superbet", "Stoiximan"];
+const TARGET_BOOKMAKERS = ["Novibet", "Stoiximan"];
 const REFERENCE_BOOKMAKER = "pinnacle";
 // Quota guard: stop a multi-league scan once The Odds API monthly credits drop
 // below this floor, so the autoscan can never drain the budget to zero. The
@@ -321,7 +321,7 @@ function opportunityRow(result, fixture, consensus) {
   };
 }
 
-// Price one league's Stoiximan/Superbet odds against its Pinnacle reference.
+// Price one league's Stoiximan/Novibet odds against its Pinnacle reference.
 // Every returned opportunity/pair carries the league's sportKey so paper bets,
 // CLV capture, and settlement can later query the right reference sport.
 async function scanLeague({
@@ -790,7 +790,7 @@ function flag(rest, name) {
   return hit ? hit.split("=")[1] : undefined;
 }
 
-// Price a Stoiximan/Superbet "Ενισχυμένες Αποδόσεις" boost that the user is
+// Price a Stoiximan/Novibet "Ενισχυμένες Αποδόσεις" boost that the user is
 // looking at, against real de-vigged sharp odds — the same dual confirmation
 // (Pinnacle + 3-book consensus) the alert pipeline uses, instead of the assumed
 // market margin of the offline `boost` calculator. The user supplies the boost

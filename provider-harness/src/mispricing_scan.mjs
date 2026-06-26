@@ -13,7 +13,7 @@ import {
 } from "./mispricing_state.mjs";
 import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
 
-const BOOKMAKERS = ["Stoiximan", "Superbet"];
+const BOOKMAKERS = ["Stoiximan", "Novibet"];
 const QUOTA_RESERVE = 100;
 const PRIMARY_REFERENCE_SOURCE = "the-odds-api";
 const FALLBACK_REASONS = new Set([

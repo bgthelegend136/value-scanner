@@ -1,14 +1,14 @@
-// Scope: Stoiximan + Superbet, MATCH_RESULT-only. The EV floor (see
+// Scope: Stoiximan + Novibet, MATCH_RESULT-only. The EV floor (see
 // mispricing_thresholds.mjs) is tuned to catch bookmaker *mistakes* (~10-20%
 // edges). Odds-API.io reports `expectedValue` as an index ~ (offered/fair)*100,
 // NOT a percentage, so the fraction is (value - 100)/100.
-// TOTALS stays deferred (undocumented over/under direction). Superbet candidates
-// resolve to superbet.bet.br (Brazil) — fine for detection, verify before betting.
+// TOTALS stays deferred (undocumented over/under direction). Novibet candidates
+// may resolve to novibet.bet.br (Brazil) -- verify before betting.
 import { MIN_CANDIDATE_EV } from "./mispricing_thresholds.mjs";
 
 const MAX_AGE_MS = 10 * 60 * 1000;
 
-const SUPPORTED_BOOKMAKERS = new Set(["Stoiximan", "Superbet"]);
+const SUPPORTED_BOOKMAKERS = new Set(["Stoiximan", "Novibet"]);
 const ALLOWED_HOSTS = {
   Stoiximan: new Set([
     "stoiximan.gr",
@@ -16,10 +16,10 @@ const ALLOWED_HOSTS = {
     "en.stoiximan.gr",
     "m.stoiximan.gr",
   ]),
-  Superbet: new Set([
-    "superbet.gr",
-    "www.superbet.gr",
-    "superbet.bet.br",
+  Novibet: new Set([
+    "novibet.gr",
+    "www.novibet.gr",
+    "novibet.bet.br",
   ]),
 };
 

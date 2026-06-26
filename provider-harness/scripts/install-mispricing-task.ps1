@@ -70,7 +70,7 @@ Register-ScheduledTask `
   -Trigger $Trigger `
   -Settings $Settings `
   -Principal $Principal `
-  -Description 'Sends independently confirmed Stoiximan/Superbet mispricing alerts to Telegram.' `
+  -Description 'Sends independently confirmed Stoiximan/Novibet mispricing alerts to Telegram.' `
   -Force | Out-Null
 
 # The older funnel sampler duplicates provider calls. Keep its history, but

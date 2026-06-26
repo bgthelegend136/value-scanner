@@ -1,5 +1,5 @@
 // Single source of truth for the mispricing EV gates. These are meant to be
-// tuned: the goal is to catch Stoiximan/Superbet *mistakes*, which typically
+// tuned: the goal is to catch Stoiximan/Novibet *mistakes*, which typically
 // surface as ~10-20% edges against a de-vigged sharp consensus.
 //
 // MIN_CANDIDATE_EV  — Odds-API.io's (approximate) EV a candidate must show to be
@@ -49,4 +49,4 @@ export const CLV_CAPTURE_WINDOW_MS = 20 * 60 * 1000;
 //                            anchor (pinnacle) and the two target books whose
 //                            own price is the thing under test.
 export const MAX_QUOTE_AGE_MS = 10 * 60 * 1000;
-export const CONSENSUS_EXCLUDED_BOOKS = new Set(["pinnacle", "stoiximan", "superbet"]);
+export const CONSENSUS_EXCLUDED_BOOKS = new Set(["pinnacle", "stoiximan", "superbet", "novibet"]);

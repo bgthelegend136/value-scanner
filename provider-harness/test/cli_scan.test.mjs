@@ -38,7 +38,7 @@ const oddsApiOdds = {
   id: 999, home: "Spain", away: "Cape Verde", date: "2026-06-25T18:00:00Z", league: { name: "World Cup" },
   bookmakers: {
     Stoiximan: [{ name: "ML", updatedAt: "2026-06-24T12:00:00Z", odds: [{ home: "1.28", draw: "7.50", away: "10.5" }] }],
-    Superbet: [{ name: "ML", updatedAt: "2026-06-24T12:00:00Z", odds: [{ home: "1.29", draw: "6.10", away: "10.0" }] }],
+    Novibet: [{ name: "ML", updatedAt: "2026-06-24T12:00:00Z", odds: [{ home: "1.29", draw: "6.10", away: "10.0" }] }],
   },
 };
 
@@ -76,7 +76,7 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
   assert.match(out, /Match: Spain - Cape Verde/);
   assert.match(out, /Stoiximan/);
   assert.deepEqual(calls.find((c) => c[0] === "oddsapi.events")[1], { sport: "football", league: "international-fifa-world-cup", status: "pending", limit: 100 });
-  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.multi")[1], { eventIds: ["999"], bookmakers: ["Superbet", "Stoiximan"] });
+  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.multi")[1], { eventIds: ["999"], bookmakers: ["Novibet", "Stoiximan"] });
   assert.equal(calls.filter((c) => c[0] === "oddsapi.multi").length, 1);
   assert.equal(calls.filter((c) => c[0] === "theodds.odds").length, 1);
 
@@ -94,8 +94,8 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
     valueRaw,
     /^\+\d+\.\d+%,(VALUE|VALUE_CHECK|SUSPICIOUS),Spain v Cape Verde,Draw \(X\),Stoiximan,7\.50,\d+\.\d+,\d+\.\d+,2,/m,
   );
-  // the clean report must NOT contain the NO_VALUE Superbet draw row
-  assert.doesNotMatch(valueRaw, /Superbet/);
+  // the clean report must NOT contain the NO_VALUE Novibet draw row
+  assert.doesNotMatch(valueRaw, /Novibet/);
 
   const fullRaw = await readFile(join(reportsDir, fullReport), "utf8");
   assert.match(fullRaw, /NO_VALUE/);

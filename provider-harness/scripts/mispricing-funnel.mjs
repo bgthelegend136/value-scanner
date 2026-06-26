@@ -32,7 +32,7 @@ const CONF_PCT = (MIN_CONFIRMED_EV * 100).toFixed(0);
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const SPORT_MAP = resolve(HERE, "..", "config", "multisport-map.json");
 const DEFAULT_LOG = resolve(HERE, "..", "reports", "mispricing-funnel-log.csv");
-const BOOKMAKERS = ["Stoiximan", "Superbet"];
+const BOOKMAKERS = ["Stoiximan", "Novibet"];
 
 const LOG_COLUMNS = [
   "ranAt", "bookmaker", "raw", "ml", "evMaxPct",

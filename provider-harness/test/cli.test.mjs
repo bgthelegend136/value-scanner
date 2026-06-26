@@ -82,7 +82,7 @@ test("events prints a bounded readable fixture list with rate limit, no raw json
   assert.doesNotMatch(out.text, /"home"/); // no raw JSON dump
 });
 
-test("capture requests only Superbet and Stoiximan and writes canonical rows with blank manual columns", async () => {
+test("capture requests only Novibet and Stoiximan and writes canonical rows with blank manual columns", async () => {
   const out = collector();
   const calls = [];
   const reportsDir = await mkdtemp(join(tmpdir(), "odds-capture-"));
@@ -96,7 +96,7 @@ test("capture requests only Superbet and Stoiximan and writes canonical rows wit
   });
 
   assert.equal(code, 0);
-  assert.deepEqual(calls[0], ["odds", { eventId: "123456", bookmakers: ["Superbet", "Stoiximan"] }]);
+  assert.deepEqual(calls[0], ["odds", { eventId: "123456", bookmakers: ["Novibet", "Stoiximan"] }]);
 
   const files = await readdir(reportsDir);
   assert.equal(files.length, 1);
@@ -105,7 +105,7 @@ test("capture requests only Superbet and Stoiximan and writes canonical rows wit
 
   assert.ok(rows.length > 0);
   for (const row of rows) {
-    assert.ok(["Superbet", "Stoiximan"].includes(row.bookmaker));
+    assert.ok(["Novibet", "Stoiximan"].includes(row.bookmaker));
     assert.equal(row.siteOdds, "");
     assert.equal(row.siteObservedAt, "");
     assert.equal(row.notes, "");

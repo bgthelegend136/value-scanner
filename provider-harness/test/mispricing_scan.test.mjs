@@ -104,7 +104,7 @@ test("confirms, sends once per book, records delivery, and does not duplicate", 
   assert.equal(first.confirmed, 2);
   assert.equal(first.sent, 2);
   assert.equal(second.sent, 0);
-  assert.deepEqual(sent.sort(), ["Stoiximan", "Superbet"].sort());
+  assert.deepEqual(sent.sort(), ["Stoiximan", "Novibet"].sort());
   assert.equal((await state.readAlerts()).length, 2);
 
   const clv = await state.readClvLedger();
@@ -115,7 +115,6 @@ test("confirms, sends once per book, records delivery, and does not duplicate", 
   // The second run must not duplicate the tracking rows.
   assert.equal((await state.readClvLedger()).length, 2);
 });
-
 test("records a heartbeat with the last success time and summary", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-heartbeat-"));
   const state = createMispricingState({ reportsDir });

@@ -14,7 +14,7 @@ These are project-owner safety rules. They override convenience and feature goal
 
 1. Never send a betting alert based only on Odds-API.io EV. Every alert must pass independent dual confirmation against The Odds API: Pinnacle fair probability plus 3-book consensus EV over the floor. If confirmation data is missing, send nothing.
 2. Never scrape, log in, place a bet, fabricate a bookmaker URL, or expose any API key/token.
-3. Accept only HTTPS deep links on the explicit Stoiximan/Superbet domain allowlists in `src/mispricing_normalize.mjs`. Anything else becomes an empty link, never a guessed URL.
+3. Accept only HTTPS deep links on the explicit Stoiximan/Novibet domain allowlists in `src/mispricing_normalize.mjs`. Anything else becomes an empty link, never a guessed URL.
 4. Secrets (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ODDS_API_IO_KEY`, `THE_ODDS_API_KEY`) must never be printed, written to reports, included in errors/stacks, or committed. They live only in `.env.local` files.
 5. Estimated boost legs are manual-analysis only. Do not send alerts from estimated legs.
 
@@ -24,9 +24,9 @@ If a task appears to require breaking one of these, stop and flag it.
 
 ## 1. Mission
 
-Detect bookmaker pricing mistakes on Stoiximan and Superbet, independently confirm them against sharp reference odds, and push only confirmed opportunities to Telegram. The human decides and bets manually.
+Detect bookmaker pricing mistakes on Stoiximan and Novibet, independently confirm them against sharp reference odds, and push only confirmed opportunities to Telegram. The human decides and bets manually.
 
-Current automated alert scope remains deliberately narrow: Stoiximan + Superbet, `MATCH_RESULT` only, 10% EV floor in `src/mispricing_thresholds.mjs`.
+Current automated alert scope remains deliberately narrow: Stoiximan + Novibet, `MATCH_RESULT` only, 10% EV floor in `src/mispricing_thresholds.mjs`.
 
 Boost tooling is a manual decision aid. It may analyze wider markets, but it must label confidence explicitly and must not feed Telegram alerts unless every leg is fully verified under the strict rule.
 
@@ -34,6 +34,18 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (Codex Novibet switch).** The active bookmaker pair
+> was changed from Stoiximan/Superbet to **Stoiximan/Novibet** because the owner
+> switched Odds-API.io bookmaker access and a live probe returned Stoiximan 200
+> with 99 rows, Novibet 200 with 97 rows, and Superbet 403. Paper scan,
+> production mispricing scan, and the diagnostic funnel now request Novibet
+> instead of Superbet; live alerts still require Pinnacle + 3-book consensus and
+> the 10% Telegram floor. Novibet links are allowlisted only for
+> `novibet.gr`, `www.novibet.gr`, and observed `novibet.bet.br`; anything else
+> is stripped. One live paper scan found 6 value bets, recorded 4 new paper bets
+> (2 Novibet, 2 Stoiximan), then CLV captured 19 total rows with 18 positive and
+> average CLV +2.2%. Strict live `mispricing-scan --dry-run` sent nothing:
+> candidates 1, mapped 0, confirmed 0. Latest The Odds API quota observed: 258.
 > **Status update 2026-06-27 (Codex Part C snapshot).** Data-collection window
 > is running correctly; no threshold changed. `Bet-Paper-Scan` is Ready, repeats
 > every 8h from `2026-06-27T00:00:00+03:00`, and stops at duration end after
@@ -249,7 +261,7 @@ State/artifacts are written under gitignored `reports/`: `mispricing-audit.csv`,
 - `double_chance` must be derived from de-vigged `MATCH_RESULT` probabilities, not by de-vigging the `double_chance` market directly. Double-chance outcomes overlap, so treating them as a normal mutually exclusive 3-way market is wrong.
 - One-sided player/scorer markets cannot be fully verified from a yes-only price. `boost-mix` may estimate them with per-market margins, but that remains `ESTIMATE_ONLY`.
 - The strict alert rule is unchanged: Pinnacle fair probability plus 3-book consensus, or no verified verdict.
-- Superbet links may resolve to `superbet.bet.br` for detection. The human verifies market availability before betting; allowlist behavior is intentional.
+- Novibet links may resolve to `novibet.bet.br` for detection. The human verifies market availability before betting; allowlist behavior is intentional.
 - PowerShell 5.1 scheduler switch gotcha: `-StartWhenAvailable` and `-WakeToRun` are switches, not boolean args. Tests assert the scripts avoid the bad form.
 
 ---
