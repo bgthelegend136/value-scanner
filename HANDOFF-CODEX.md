@@ -49,6 +49,14 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 > Southern League keys, so no mapping was added. Live scanner has now sent 2
 > strict confirmed Telegram alerts today; `mispricing-clv` captured both, with
 > 1/2 positive and average CLV +12.1%. Latest quota observed: 311 remaining.
+> **Status update 2026-06-26 (Codex live settlement).** Added
+> `mispricing-settle` so sent Telegram alerts in `reports/mispricing-clv.csv`
+> are settled to `WON`/`LOST`/`PUSH`/`REVIEW` with one-unit profit/ROI. The
+> daily `run-paper-settle.ps1` now runs both paper `settle` and live
+> `mispricing-settle`. Also fixed a CLV overwrite bug: already-captured CLV
+> rows are no longer recaptured while they remain `PENDING` for settlement.
+> Existing live alert CLV row corrupted by the pre-fix recapture was restored
+> to the original near-kickoff capture. `node --test` -> **190/190 passing**.
 > **Status update 2026-06-26 (Codex paper-settle scheduler).** Added daily paper
 > settlement scripts: `scripts/run-paper-settle.ps1` and
 > `scripts/install-paper-settle-task.ps1`. The runner executes `node src/cli.mjs

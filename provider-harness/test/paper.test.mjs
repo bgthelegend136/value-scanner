@@ -204,6 +204,22 @@ test("applies closing-line CLV to pending bets and skips settled ones", () => {
   assert.equal(updated[1].clv, ""); // settled row untouched
 });
 
+test("does not overwrite an existing CLV capture while a bet is still pending", () => {
+  const rows = [
+    pending({
+      closingFairOdds: "9.4448",
+      clv: "-0.041798",
+      clvCapturedAt: "2026-06-26T19:00:04.288Z",
+    }),
+  ];
+  const closing = new Map([[`${rows[0].referenceEventId}|MATCH_RESULT||X`, 0.8]]);
+  const updated = applyClosingLine(rows, closing, { capturedAt: "2026-06-26T19:45:00.000Z" });
+
+  assert.equal(updated[0].closingFairOdds, "9.4448");
+  assert.equal(updated[0].clv, "-0.041798");
+  assert.equal(updated[0].clvCapturedAt, "2026-06-26T19:00:04.288Z");
+});
+
 test("leaves CLV blank when no closing line covers the selection", () => {
   const updated = applyClosingLine([pending()], new Map(), { capturedAt: "x" });
   assert.equal(updated[0].clv, "");

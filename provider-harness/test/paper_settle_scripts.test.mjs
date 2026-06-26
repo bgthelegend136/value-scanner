@@ -9,10 +9,12 @@ test("paper-settle runner runs settle and writes a transcript log", async () => 
   );
 
   assert.match(source, /node src[\\/]cli\.mjs settle/);
+  assert.match(source, /node src[\\/]cli\.mjs mispricing-settle/);
   assert.match(source, /reports[\\/]logs/);
   assert.match(source, /paper-settle-\$Stamp\.log/);
   assert.match(source, /Start-Transcript/);
   assert.match(source, /settle exited with code/);
+  assert.match(source, /mispricing-settle exited with code/);
   assert.doesNotMatch(source, /TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|ODDS_API_IO_KEY|mispricing-scan/);
 });
 

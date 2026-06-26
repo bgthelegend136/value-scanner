@@ -29,6 +29,7 @@ export const CLV_LEDGER_COLUMNS = [
   "market", "line", "outcome", "decimalOdds", "kickoffUtc",
   "sendFairProbability", "status",
   "closingFairOdds", "clv", "clvCapturedAt",
+  "homeScore", "awayScore", "profit", "settledAt",
 ];
 
 const exists = (path) => access(path).then(() => true, () => false);
@@ -103,6 +104,10 @@ export function buildClvTrackingRow(candidate, confirmation, { sentAt }) {
     closingFairOdds: "",
     clv: "",
     clvCapturedAt: "",
+    homeScore: "",
+    awayScore: "",
+    profit: "",
+    settledAt: "",
   };
 }
 

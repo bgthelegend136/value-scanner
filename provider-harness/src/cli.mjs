@@ -29,6 +29,10 @@ import {
 import { createValueBetsClient } from "./value_bets_client.mjs";
 import { createTelegramClient } from "./telegram.mjs";
 import { createMispricingState } from "./mispricing_state.mjs";
+import {
+  settleMispricingAlerts,
+  summarizeMispricingSettlements,
+} from "./mispricing_settle.mjs";
 import { CLV_CAPTURE_WINDOW_MS } from "./mispricing_thresholds.mjs";
 import { loadSportRegistry } from "./multisport_map.mjs";
 import { runMispricingScan } from "./mispricing_scan.mjs";
@@ -632,6 +636,7 @@ async function runMispricingClv({ loadTheOddsKey, createTheOddsClient, out, repo
   const nowMs = now().getTime();
   const due = rows.filter((row) =>
     row.status === "PENDING" &&
+    !row.clvCapturedAt &&
     new Date(row.kickoffUtc).getTime() <= nowMs + CLV_CAPTURE_WINDOW_MS);
   if (due.length === 0) {
     out("No pending mispricing alerts ready for CLV capture.\n");
@@ -673,6 +678,57 @@ async function runMispricingClv({ loadTheOddsKey, createTheOddsClient, out, repo
       `Average CLV: ${averageClv}`,
     ].join("\n") + "\n",
   );
+  out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
+  return 0;
+}
+
+function printMispricingSettlementSummary(out, rows) {
+  const summary = summarizeMispricingSettlements(rows);
+  const roi = summary.roi === null ? "N/A" : `${signed(summary.roi * 100, 1)}%`;
+  out(
+    [
+      `Live alerts: ${summary.total}`,
+      `Pending: ${summary.pending}`,
+      `Settled: ${summary.settled}`,
+      `Wins: ${summary.wins}`,
+      `Losses: ${summary.losses}`,
+      `Pushes: ${summary.pushes}`,
+      `Review: ${summary.review}`,
+      `Net profit: ${signed(summary.profit)} units`,
+      `ROI: ${roi}`,
+      "Settlement limitation: soccer ROI uses The Odds API aggregate score; extra-time period semantics are not documented.",
+    ].join("\n") + "\n",
+  );
+}
+
+async function runMispricingSettle({ loadTheOddsKey, createTheOddsClient, out, reportsDir }) {
+  const state = createMispricingState({ reportsDir });
+  const rows = await state.readClvLedger();
+  if (rows.length === 0) {
+    out("No live alert ledger found. Wait for Telegram alerts first.\n");
+    return 0;
+  }
+  if (!rows.some((row) => row.status === "PENDING")) {
+    out("No pending live alerts to settle.\n");
+    printMispricingSettlementSummary(out, rows);
+    return 0;
+  }
+
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  const pendingSportKeys = new Set(
+    rows.filter((row) => row.status === "PENDING").map((row) => row.sportKey),
+  );
+  const scoreEvents = [];
+  let quotaRemaining;
+  for (const sportKey of pendingSportKeys) {
+    const response = await client.getScores({ sportKey, daysFrom: 3 });
+    quotaRemaining = response.quota?.remaining ?? quotaRemaining;
+    scoreEvents.push(...(response.data ?? []));
+  }
+
+  const settled = settleMispricingAlerts(rows, scoreEvents);
+  await state.writeClvLedger(settled);
+  printMispricingSettlementSummary(out, settled);
   out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
   return 0;
 }
@@ -1098,6 +1154,11 @@ export async function runCli(argv, deps = {}) {
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
       });
     }
+    if (command === "mispricing-settle") {
+      return await runMispricingSettle({
+        loadTheOddsKey, createTheOddsClient, out, reportsDir,
+      });
+    }
     if (command === "boost") {
       return runBoost(rest, { out, err });
     }
@@ -1161,7 +1222,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | clv-report | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

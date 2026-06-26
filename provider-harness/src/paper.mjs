@@ -219,6 +219,7 @@ export function findStalePending(rows, now, { days = 3 } = {}) {
 export function applyClosingLine(rows, closingFairByKey, { capturedAt }) {
   return rows.map((row) => {
     if (row.status !== "PENDING") return { ...row };
+    if (row.clvCapturedAt) return { ...row };
     const key = `${row.referenceEventId}|${row.market}|${row.line ?? ""}|${row.outcome}`;
     const fairProbability = closingFairByKey.get(key);
     if (!(fairProbability > 0)) return { ...row };

@@ -112,6 +112,34 @@ test("mispricing-clv waits until kickoff is near before capturing the close", as
   assert.equal(row.status, "PENDING"); // still awaiting the close
 });
 
+test("mispricing-clv does not recapture an alert that already has CLV", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "mclv-already-captured-"));
+  const state = createMispricingState({ reportsDir });
+  await state.writeClvLedger([
+    clvRow({
+      closingFairOdds: "9.4448",
+      clv: "-0.041798",
+      clvCapturedAt: "2026-06-26T19:00:04.288Z",
+    }),
+  ]);
+  let calls = 0;
+  const code = await runCli(["mispricing-clv"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({ async getOdds() { calls += 1; return { data: [], quota: {} }; } }),
+    reportsDir,
+    now: () => new Date("2026-06-26T19:45:00.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.equal(calls, 0);
+  const [row] = await state.readClvLedger();
+  assert.equal(row.status, "PENDING");
+  assert.equal(row.clv, "-0.041798");
+  assert.equal(row.clvCapturedAt, "2026-06-26T19:00:04.288Z");
+});
+
 test("mispricing-clv spends no quota with no pending alerts", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "mclv-empty-"));
   let calls = 0;
