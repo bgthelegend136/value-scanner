@@ -47,6 +47,10 @@ const execFileAsync = promisify(execFile);
 
 const TARGET_BOOKMAKERS = ["Superbet", "Stoiximan"];
 const REFERENCE_BOOKMAKER = "pinnacle";
+// Quota guard: stop a multi-league scan once The Odds API monthly credits drop
+// below this floor, so the autoscan can never drain the budget to zero. The
+// reserve leaves room for CLV capture (the irreplaceable spend).
+const MIN_SCAN_QUOTA = 60;
 const SCAN_COLUMNS = [
   "bookmaker", "eventId", "kickoffUtc", "homeTeam", "awayTeam",
   "market", "line", "outcome", "decimalOdds", "fairOdds", "fairProbability",
@@ -422,6 +426,10 @@ async function runScan({
     allRows.push(...result.allRows);
     matchedFixtures += result.matchedFixtures;
     if (result.quotaRemaining !== undefined) quotaRemaining = result.quotaRemaining;
+    if (Number.isFinite(quotaRemaining) && quotaRemaining < MIN_SCAN_QUOTA) {
+      out(`Stopping scan: The Odds API quota ${quotaRemaining} is below the ${MIN_SCAN_QUOTA}-credit floor (reserved for CLV).\n`);
+      break;
+    }
   }
 
   opportunities.sort((a, b) => b.result.ev - a.result.ev);

@@ -170,6 +170,28 @@ test("scan covers every in-season mapped league and tags paper bets with sportKe
   assert.match(ledger, /^br1,222,.*soccer_brazil_serie_b$/m);
 });
 
+test("scan stops early when The Odds API quota falls below the floor", async () => {
+  let oddsCalls = 0;
+  const theOdds = {
+    async listSports() { return { data: [{ key: "soccer_a", group: "Soccer", title: "A", active: true }, { key: "soccer_b", group: "Soccer", title: "B", active: true }] }; },
+    async listEvents() { return { data: [], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 50 } }; },
+    async getOdds() { oddsCalls += 1; return { data: [], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 50 } }; },
+  };
+  const oddsClient = { async listEvents() { return { data: [], receivedAt: "x", rateLimit: {} }; }, async getOddsMulti() { return { data: [] }; } };
+  let out = "";
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-quota-"));
+  const code = await runCli(["scan"], {
+    out: (t) => { out += t; }, err: () => {},
+    loadApiKey: async () => ODDS_KEY, loadTheOddsKey: async () => THEODDS_KEY,
+    createClient: () => oddsClient, createTheOddsClient: () => theOdds,
+    reportsDir, now: () => new Date("2026-06-24T12:00:05.000Z"),
+    loadRegistry: async () => new Map([["football|a", "soccer_a"], ["football|b", "soccer_b"]]),
+  });
+  assert.equal(code, 0);
+  assert.match(out, /Stopping scan: The Odds API quota 50 is below the 60-credit floor/);
+  assert.equal(oddsCalls, 1); // stopped after the first league, never queried the second
+});
+
 test("repeated scans do not duplicate the same paper bet", async () => {
   const calls = [];
   let out = "";

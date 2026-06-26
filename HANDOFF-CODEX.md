@@ -34,6 +34,17 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (Codex token window).** Part A of the
+> API-token plan is done. `scan` now has a quota guard (`MIN_SCAN_QUOTA = 60`)
+> that stops the multi-league paper scan before The Odds API credits can be
+> drained below the CLV reserve. `Bet-Mispricing-Funnel` was disabled because
+> it duplicated provider calls. `Bet-Paper-Scan` remains the 8-hour paper-only
+> data collector, with a 3-day repetition window ending around `2026-06-30`.
+> `Bet-Paper-Settle` is enabled daily at 07:30 and was verified with
+> `LastTaskResult=0`; it runs `fd-settle`, then `settle`, then
+> `mispricing-settle`. TheSportsDB was probed and deferred: key `123` works for
+> v1/free, but the free tier returns too little data for reliable settlement
+> and v2 requires premium.
 > **Status update 2026-06-26 (Codex ops).** `Bet-Paper-Settle` is now
 > registered in Windows Task Scheduler and will run daily at 07:30 local time.
 > First scheduled run is `2026-06-27 07:30`; it has not run yet
@@ -402,12 +413,15 @@ these in order; all are free/cheap and must follow the §0 rules and TDD.
    soccer/World Cup paper bets for FREE via football-data.org (`football_data_client.mjs`
    + `football_data_settle.mjs`, key `football_data_org_key`, header `X-Auth-Token`,
    10 req/min). `run-paper-settle.ps1` runs `fd-settle` first, then `settle` for the
-   rest — so The Odds API credits are reserved for CLV. **Next: extend free settlement
-   to NON-soccer (MLB/NFL/NPB) via TheSportsDB** (key `sports_db_key` is set, but the v1
-   `eventspastleague id=4429` probe returned HTTP 400 — find the right league id or use
-   v2 `X-API-KEY`; mirror the football-data pattern). Soccer name-matching uses
+   rest — so The Odds API credits are reserved for CLV. Soccer name-matching uses
    normalized names + date; watch club-league name mismatches when expanding beyond
    national teams.
+7. **TheSportsDB free settlement: DEFERRED 2026-06-27.** The key is set to
+   `123` and v1/free works, but free endpoints return too little data
+   (~3 events/day, 1 observed for MLB) and v2 requires premium. Do not build the
+   non-soccer settlement adapter unless the owner chooses TheSportsDB Premium.
+   For now, non-soccer fallback settlement stays on The Odds API. This is cheap
+   enough because there are no non-soccer paper bets yet.
 
 ### Decision 2026-06-27 — SportsGameOdds (SGO): DO NOT integrate yet
 
