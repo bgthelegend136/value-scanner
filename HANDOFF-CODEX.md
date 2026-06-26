@@ -34,6 +34,13 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-26 (Codex paper-settle scheduler).** Added daily paper
+> settlement scripts: `scripts/run-paper-settle.ps1` and
+> `scripts/install-paper-settle-task.ps1`. The runner executes `node src/cli.mjs
+> settle`, writes `reports/logs/paper-settle-YYYY-MM-DD.log`, needs only
+> `THE_ODDS_API_KEY`, and sends no Telegram. The installer registers
+> `Bet-Paper-Settle` daily at 07:30, but Codex did **not** register it in Windows
+> Task Scheduler during this change.
 > **Status update 2026-06-26 (Codex clv-report).** Added a no-quota `clv-report`
 > command for the paper ledger. It reads `provider-harness/reports/paper-bets.csv`
 > and writes `reports/clv-report.csv` + `reports/clv-report.json`, grouped overall,
@@ -41,7 +48,7 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 > CLV rows, 14 positive, beat rate 93.3%, average CLV +2.2%. This is still a small
 > sample and does not change the 10% Telegram alert floor.
 > **Status update 2026-06-26.** Repo consolidated to `master` in the main folder
-> (worktrees removed). `node --test` -> **182/182 passing**. The three Windows
+> (worktrees removed). `node --test` -> **184/184 passing**. The three Windows
 > scheduled tasks are **registered and ran successfully** from the main folder
 > (`LastTaskResult=0`); the Scanner's first real live cycle produced
 > `candidates:2 → mapped:0 → confirmed:0 → sent:0` with zero API/Telegram failures
@@ -361,9 +368,7 @@ these in order; all are free/cheap and must follow the §0 rules and TDD.
    `paper-bets.csv` and summarises **beat-rate and average CLV over time and per
    `sportKey`** — not just the current capture. This is the metric the owner uses
    to decide if the edge is real. Persist a small CSV/JSON summary under `reports/`.
-3. **Daily settle.** Pending paper bets need results. Either add a daily `settle`
-   scheduled task (mirror `install-paper-scan-task.ps1`, needs only THE_ODDS_API_KEY)
-   or extend the paper-scan runner to settle bets whose kickoff has passed.
+3. **Daily settle: DONE 2026-06-26.** Added `run-paper-settle.ps1` + `install-paper-settle-task.ps1`. The installer creates `Bet-Paper-Settle` daily at 07:30 and requires only `THE_ODDS_API_KEY`. It was not registered automatically by Codex.
 4. **Hold calibration until the data says so.** Do NOT lower the 10% Telegram
    alert floor. Only after ~200 settled bets with CLV: if beat-rate stays clearly
    above ~55% and average CLV is positive, propose a calibrated live-alert floor as
