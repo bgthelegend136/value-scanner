@@ -69,18 +69,19 @@ export function consensusFairProbabilities(referenceSelections) {
     if (!byBook.has(selection.bookmaker)) byBook.set(selection.bookmaker, []);
     byBook.get(selection.bookmaker).push(selection);
   }
-  const totals = new Map();
+  // Power de-vig per book, then take the median across books — the same method
+  // the alert path (mispricing_confirm.mjs) uses, so both consensus figures
+  // agree. Median is more robust to a single mispriced/soft book than the mean.
+  const samples = new Map();
   for (const bookSelections of byBook.values()) {
-    for (const [key, probability] of devig(bookSelections)) {
-      const entry = totals.get(key) ?? { sum: 0, books: 0 };
-      entry.sum += probability;
-      entry.books += 1;
-      totals.set(key, entry);
+    for (const [key, probability] of devigPower(bookSelections)) {
+      if (!samples.has(key)) samples.set(key, []);
+      samples.get(key).push(probability);
     }
   }
   const consensus = new Map();
-  for (const [key, { sum, books }] of totals) {
-    consensus.set(key, { fairProbability: sum / books, books });
+  for (const [key, probabilities] of samples) {
+    consensus.set(key, { fairProbability: median(probabilities), books: probabilities.length });
   }
   return consensus;
 }

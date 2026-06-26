@@ -74,6 +74,19 @@ test("consensus ignores a book's incomplete market but keeps complete ones", () 
   assert.equal(consensus.get("TOTALS|2.5|OVER").books, 1);
 });
 
+test("consensus uses power de-vig + median, matching the confirmation path", () => {
+  // A single, longshot-skewed book: the consensus value must equal that book's
+  // *power* de-vig (as confirm.mjs uses), not the proportional method.
+  const oneBook = [
+    { bookmaker: "pinnacle", market: "MATCH_RESULT", line: "", outcome: "1", decimalOdds: 1.30 },
+    { bookmaker: "pinnacle", market: "MATCH_RESULT", line: "", outcome: "X", decimalOdds: 6.20 },
+    { bookmaker: "pinnacle", market: "MATCH_RESULT", line: "", outcome: "2", decimalOdds: 11.0 },
+  ];
+  const home = consensusFairProbabilities(oneBook).get("MATCH_RESULT||1").fairProbability;
+  assert.ok(Math.abs(home - devigPower(oneBook).get("MATCH_RESULT||1")) < 1e-9);
+  assert.notEqual(home, devig(oneBook).get("MATCH_RESULT||1"));
+});
+
 test("consensus averages per-book de-vig and counts the books", () => {
   const multiBook = [
     { bookmaker: "pinnacle", market: "MATCH_RESULT", line: "", outcome: "1", decimalOdds: 2.0 },
