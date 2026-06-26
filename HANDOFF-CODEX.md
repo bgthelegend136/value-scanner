@@ -34,6 +34,18 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (Codex Part C snapshot).** Data-collection window
+> is running correctly; no threshold changed. `Bet-Paper-Scan` is Ready, repeats
+> every 8h from `2026-06-27T00:00:00+03:00`, and stops at duration end after
+> `P3D`; `Bet-Paper-Settle` is Ready daily at 07:30; Funnel remains Disabled.
+> Latest heartbeat shows successful live scanner at `2026-06-26T23:30:03Z`,
+> quota remaining `280`. Paper ledger is still small: 16 bets total, 4 WON,
+> 1 LOST, 11 PENDING. `clv-report` remains 15 captured, 14 positive, beat-rate
+> 93.3%, average CLV +2.2%, all World Cup; this is still too small for
+> calibration. P4 audit found 30 `UNMAPPED_SPORT_LEAGUE` rows, led by club
+> friendlies, Chile Copa Chile, New Zealand Southern League, Brazil Serie D, and
+> lower Australia/Argentina leagues. A zero-credit The Odds API `/sports` check
+> found no active matching keys for those groups, so no mapping was added.
 > **Status update 2026-06-27 (Codex free settlement probes).** The owner added
 > `api_sports_key` and `highlightly_key`; both were probed without printing
 > secrets. API-Sports is the best free replacement candidate for Part B:
@@ -440,6 +452,13 @@ these in order; all are free/cheap and must follow the §0 rules and TDD.
    host follow-up. If non-soccer paper bets begin accumulating or The Odds API
    settlement burn becomes material, implement API-Sports first; keep Highlightly
    as secondary fallback only.
+9. **Part C snapshot: RUNNING 2026-06-27.** The 3-day window is active and
+   protected by the quota guard plus task repetition duration. Current sample is
+   still too small for calibration (16 paper bets, 5 settled, 15 CLV captures).
+   P4 audit was run against current reports: `UNMAPPED_SPORT_LEAGUE` exists, but
+   the zero-credit active `/sports` list does not expose matching The Odds API
+   sport keys for the observed lower leagues, so no safe mappings were added.
+   Continue collecting until the auto-stop, then rerun `clv-report` and P4 audit.
 
 ### Decision 2026-06-27 — SportsGameOdds (SGO): DO NOT integrate yet
 
