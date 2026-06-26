@@ -27,6 +27,7 @@ import {
 import { createValueBetsClient } from "./value_bets_client.mjs";
 import { createTelegramClient } from "./telegram.mjs";
 import { createMispricingState } from "./mispricing_state.mjs";
+import { CLV_CAPTURE_WINDOW_MS } from "./mispricing_thresholds.mjs";
 import { loadSportRegistry } from "./multisport_map.mjs";
 import { runMispricingScan } from "./mispricing_scan.mjs";
 import { matchCandidateEvent } from "./mispricing_match.mjs";
@@ -517,15 +518,20 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
 async function runMispricingClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, now }) {
   const state = createMispricingState({ reportsDir });
   const rows = await state.readClvLedger();
-  const pending = rows.filter((row) => row.status === "PENDING");
-  if (pending.length === 0) {
-    out("No pending mispricing alerts for CLV capture.\n");
+  // Capture only once kickoff is near, so the line we grab approximates the
+  // close. Rows still far from kickoff stay PENDING for a later scheduled run.
+  const nowMs = now().getTime();
+  const due = rows.filter((row) =>
+    row.status === "PENDING" &&
+    new Date(row.kickoffUtc).getTime() <= nowMs + CLV_CAPTURE_WINDOW_MS);
+  if (due.length === 0) {
+    out("No pending mispricing alerts ready for CLV capture.\n");
     return 0;
   }
 
   const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
   const eventsBySport = new Map();
-  for (const row of pending) {
+  for (const row of due) {
     if (!eventsBySport.has(row.sportKey)) eventsBySport.set(row.sportKey, new Set());
     eventsBySport.get(row.sportKey).add(row.referenceEventId);
   }

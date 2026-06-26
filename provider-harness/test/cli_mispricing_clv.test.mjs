@@ -93,6 +93,25 @@ test("mispricing-clv captures closing line value for pending alerts", async () =
   );
 });
 
+test("mispricing-clv waits until kickoff is near before capturing the close", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "mclv-early-"));
+  const state = createMispricingState({ reportsDir });
+  await state.writeClvLedger([clvRow()]); // kickoff 18:30
+  let calls = 0;
+  const code = await runCli(["mispricing-clv"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({ async getOdds() { calls += 1; return { data: [], quota: {} }; } }),
+    reportsDir,
+    now: () => new Date("2026-06-26T12:00:00.000Z"), // 6.5h before kickoff -> too early
+  });
+  assert.equal(code, 0);
+  assert.equal(calls, 0); // no closing-line fetch yet
+  const [row] = await state.readClvLedger();
+  assert.equal(row.status, "PENDING"); // still awaiting the close
+});
+
 test("mispricing-clv spends no quota with no pending alerts", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "mclv-empty-"));
   let calls = 0;

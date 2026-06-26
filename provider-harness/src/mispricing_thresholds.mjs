@@ -30,6 +30,12 @@ export const MIN_EDGE_OVER_DISPERSION = 1.0;
 export const KELLY_FRACTION = 0.25;
 export const STAKE_CAP_FRACTION = 0.02;
 
+// Closing-line value is only meaningful at the *close*. A pending alert's CLV is
+// captured once we are within this window of kickoff, so a frequently scheduled
+// mispricing-clv run grabs a near-closing line rather than one from hours
+// earlier. Rows outside the window stay PENDING for a later run.
+export const CLV_CAPTURE_WINDOW_MS = 20 * 60 * 1000;
+
 // The strict confirmation rule is implemented identically in three reference
 // paths (mispricing_confirm, boost_legs, boost_mix). These two constants keep
 // that rule in lockstep so tightening it in one place can never silently leave
