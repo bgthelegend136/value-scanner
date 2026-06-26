@@ -3,10 +3,22 @@ import {
   CONSENSUS_EXCLUDED_BOOKS as EXCLUDED_CONSENSUS,
   MAX_QUOTE_AGE_MS as MAX_AGE_MS,
   MIN_CONFIRMED_EV,
+  MIN_EDGE_OVER_DISPERSION,
 } from "./mispricing_thresholds.mjs";
 import { devigPower, median } from "./value.mjs";
 
 export { median };
+
+// Sample standard deviation of the per-book fair probabilities — our proxy for
+// how uncertain the "true" fair value is. Fewer than two books carries no usable
+// spread.
+function standardDeviation(values) {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+    (values.length - 1);
+  return Math.sqrt(variance);
+}
 
 function exactMarket(rows, candidate) {
   return rows.filter((row) =>
@@ -84,6 +96,14 @@ export function confirmCandidate(
   const pinnacleFairProbability = pinnacle.probability;
   const pinnacleEv = candidate.offeredOdds * pinnacleFairProbability - 1;
   const consensusEv = candidate.offeredOdds * consensusFairProbability - 1;
+  // How far the consensus edge stands above the books' own disagreement. With
+  // zero disagreement (every book identical) there is no noise to clear, so the
+  // ratio is undefined and the gate is vacuously satisfied.
+  const consensusDispersion = standardDeviation(probabilities);
+  const consensusEdgeProbability = consensusFairProbability - 1 / candidate.offeredOdds;
+  const edgeOverDispersion = consensusDispersion > 0
+    ? consensusEdgeProbability / consensusDispersion
+    : null;
   const base = {
     referenceEventId: String(referenceEvent.id),
     pinnacleFairProbability,
@@ -93,6 +113,8 @@ export function confirmCandidate(
     consensusFairOdds: 1 / consensusFairProbability,
     consensusEv,
     consensusBooks: probabilities.length,
+    consensusDispersion,
+    edgeOverDispersion,
     minimumConfirmedEv: Math.min(pinnacleEv, consensusEv),
   };
   if (!(pinnacleEv > MIN_CONFIRMED_EV)) {
@@ -100,6 +122,12 @@ export function confirmCandidate(
   }
   if (!(consensusEv > MIN_CONFIRMED_EV)) {
     return { ...base, status: "REJECTED", reason: "CONSENSUS_EV_BELOW_MIN" };
+  }
+  // Uncertainty gate: an edge smaller than the sharp books' spread is noise, not
+  // signal — the kind of false positive the max-EV selection over many markets
+  // manufactures. Perfect agreement (null) clears it.
+  if (edgeOverDispersion !== null && edgeOverDispersion < MIN_EDGE_OVER_DISPERSION) {
+    return { ...base, status: "REJECTED", reason: "EDGE_WITHIN_BOOK_NOISE" };
   }
   return { ...base, status: "CONFIRMED", reason: "" };
 }

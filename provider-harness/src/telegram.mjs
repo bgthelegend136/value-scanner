@@ -14,6 +14,15 @@ function percent(value) {
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 }
 
+// How decisively the edge beats the sharp books' own disagreement. Higher is
+// safer; a value near 1 means the edge is barely outside the noise.
+function confidenceLine(confirmation) {
+  const ratio = confirmation.edgeOverDispersion;
+  if (ratio === undefined) return "";
+  if (ratio === null) return "Edge confidence: sharp books in lockstep";
+  return `Edge confidence: ${ratio.toFixed(1)}× the sharp books' disagreement`;
+}
+
 export function formatMispricingMessage(candidate, confirmation) {
   const kickoff = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Athens",
@@ -35,6 +44,7 @@ export function formatMispricingMessage(candidate, confirmation) {
     "",
     `Pinnacle fair: ${confirmation.pinnacleFairOdds.toFixed(2)} | EV: ${percent(confirmation.pinnacleEv)}`,
     `Consensus fair: ${confirmation.consensusFairOdds.toFixed(2)} | EV: ${percent(confirmation.consensusEv)} | ${confirmation.consensusBooks} books`,
+    confidenceLine(confirmation),
     "",
     "Verify the displayed price and exact market before betting.",
     linkNote,

@@ -53,6 +53,46 @@ test("confirms when both Pinnacle and the 3-book median clear the EV floor", () 
   assert.equal(result.minimumConfirmedEv, Math.min(result.pinnacleEv, result.consensusEv));
 });
 
+test("a confirmed alert exposes edge-over-dispersion confidence above 1", () => {
+  const rows = [
+    ...market3("pinnacle", 1.5, 4.2, 6.5),
+    ...market3("betsson", 1.52, 4.1, 6.3),
+    ...market3("unibet", 1.49, 4.3, 6.6),
+    ...market3("williamhill", 1.51, 4.15, 6.4),
+  ];
+  const result = confirmCandidate(footballHome, referenceEvent, rows, { now });
+  assert.equal(result.status, "CONFIRMED");
+  // Books agree tightly, so the edge dwarfs their disagreement.
+  assert.ok(result.edgeOverDispersion > 1);
+  assert.ok(result.consensusDispersion >= 0);
+});
+
+test("rejects an edge that sits within the consensus books' disagreement", () => {
+  // Two-way market. Pinnacle and the consensus median both clear the 10% EV
+  // floor (fair ~0.5, offered 2.4 -> EV +20%), but the three consensus books
+  // wildly disagree on the home fair probability (~0.61 / ~0.36 / ~0.50), so the
+  // ~8pt edge is smaller than their ~12pt spread: it is statistical noise.
+  const twoWayHome = { ...footballHome, sportSlug: "basketball", offeredOdds: 2.4 };
+  const result = confirmCandidate(
+    twoWayHome,
+    referenceEvent,
+    [
+      ...market2("pinnacle", 1.95, 1.95),
+      ...market2("betsson", 1.6, 2.4),
+      ...market2("unibet", 2.5, 1.5),
+      ...market2("williamhill", 1.95, 1.95),
+    ],
+    { now },
+  );
+  // Both EV floors are cleared, so only the dispersion gate can reject it.
+  assert.ok(result.pinnacleEv > 0.1);
+  assert.ok(result.consensusEv > 0.1);
+  assert.equal(result.consensusBooks, 3);
+  assert.equal(result.status, "REJECTED");
+  assert.equal(result.reason, "EDGE_WITHIN_BOOK_NOISE");
+  assert.ok(result.edgeOverDispersion < 1);
+});
+
 test("an EV just below the 10 percent floor is rejected", () => {
   const twoWayHome = { ...footballHome, sportSlug: "basketball", offeredOdds: 2.18 };
   const result = confirmCandidate(

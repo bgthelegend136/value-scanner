@@ -10,6 +10,19 @@
 export const MIN_CANDIDATE_EV = 0.1;
 export const MIN_CONFIRMED_EV = 0.1;
 
+// Signal-to-noise floor for a confirmed edge. The consensus books give several
+// independent estimates of the fair probability; their spread (standard
+// deviation) is a free, data-driven estimate of how uncertain that fair value
+// is. We require the probability edge (consensus fair minus the offered break-
+// even) to be at least this many standard deviations — i.e. the edge must beat
+// the sharp books' own disagreement, not merely the flat EV floor. This guards
+// against the optimizer's curse: we alert on the *largest* EV across many noisy
+// candidates, and the noisiest (longshot / illiquid) markets manufacture the
+// biggest spurious edges. 1.0 is deliberately conservative (real liquid edges
+// score in the tens); raise it once the audit's edgeOverDispersion column shows
+// the live distribution.
+export const MIN_EDGE_OVER_DISPERSION = 1.0;
+
 // The strict confirmation rule is implemented identically in three reference
 // paths (mispricing_confirm, boost_legs, boost_mix). These two constants keep
 // that rule in lockstep so tightening it in one place can never silently leave

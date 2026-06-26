@@ -18,7 +18,7 @@ export const AUDIT_COLUMNS = [
   "auditedAt", "runMode", "candidateId", "providerEventId", "bookmaker",
   "sportKey", "sportSlug", "leagueSlug", "sportName", "leagueName",
   "market", "line", "outcome", "status", "reason",
-  "pinnacleEv", "consensusEv", "consensusBooks",
+  "pinnacleEv", "consensusEv", "consensusBooks", "edgeOverDispersion",
 ];
 // One row per *sent* alert, kept so its closing-line value can be captured near
 // kickoff. decimalOdds/market/line/outcome/referenceEventId mirror the field

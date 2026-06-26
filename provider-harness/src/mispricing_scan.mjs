@@ -216,6 +216,7 @@ export async function runMispricingScan({
           pinnacleEv: confirmation.pinnacleEv ?? "",
           consensusEv: confirmation.consensusEv ?? "",
           consensusBooks: confirmation.consensusBooks ?? "",
+          edgeOverDispersion: confirmation.edgeOverDispersion ?? "",
         }));
         if (confirmation.status !== "CONFIRMED") {
           summary.rejected += 1;

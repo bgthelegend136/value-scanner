@@ -43,6 +43,14 @@ test("formats a Greece-time alert with the exact pick and verification warning",
   assert.match(text, /select the exact pick/);
 });
 
+test("shows the edge-over-dispersion confidence when present", () => {
+  const confident = formatMispricingMessage(candidate, { ...confirmation, edgeOverDispersion: 12.3 });
+  assert.match(confident, /Edge confidence: 12\.3× the sharp books' disagreement/);
+
+  const lockstep = formatMispricingMessage(candidate, { ...confirmation, edgeOverDispersion: null });
+  assert.match(lockstep, /Edge confidence: sharp books in lockstep/);
+});
+
 test("sends a Telegram message with an exact-selection button", async () => {
   const calls = [];
   const client = createTelegramClient({
