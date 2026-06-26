@@ -40,6 +40,8 @@ import { matchCandidateEvent } from "./mispricing_match.mjs";
 import { confirmCandidate } from "./mispricing_confirm.mjs";
 import { parseLegPick, legFairProbabilities } from "./boost_legs.mjs";
 import { analyzeBoostMix, parseMixLeg, priceMixLeg } from "./boost_mix.mjs";
+import { createFootballDataClient } from "./football_data_client.mjs";
+import { fdCompetitionFor, synthesizeFdScoreEvents } from "./football_data_settle.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -139,6 +141,12 @@ async function defaultLoadTheOddsKey() {
   const envPath = await resolveEnvPath(process.cwd());
   const env = await loadEnvFile(envPath);
   return requireKey(env, "THE_ODDS_API_KEY");
+}
+
+async function defaultLoadFootballDataKey() {
+  const envPath = await resolveEnvPath(process.cwd());
+  const env = await loadEnvFile(envPath);
+  return requireKey(env, "football_data_org_key");
 }
 
 async function defaultLoadMispricingConfig() {
@@ -510,6 +518,42 @@ async function runSettle({
     );
   }
   out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
+  return 0;
+}
+
+// Free settlement for soccer bets via football-data.org, so The Odds API credits
+// stay reserved for CLV. Settles only football-data-covered leagues; the rest are
+// left PENDING for the regular `settle` (The Odds API). Run this before `settle`.
+async function runFdSettle({ loadFootballDataKey, createFootballDataClient: createFd, out, reportsDir }) {
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  if (!await defaultFileExists(ledgerPath)) {
+    out("No paper-bet ledger found. Run scan first.\n");
+    return 0;
+  }
+  const rows = await readCsv(ledgerPath);
+  const pending = rows.filter(
+    (row) => row.status === "PENDING" && fdCompetitionFor(paperSportKey(row)),
+  );
+  if (pending.length === 0) {
+    out("No pending football-data-covered (soccer) paper bets to settle.\n");
+    return 0;
+  }
+
+  const client = createFd({ apiKey: await loadFootballDataKey() });
+  const competitions = new Set(pending.map((row) => fdCompetitionFor(paperSportKey(row))));
+  const fdMatches = [];
+  for (const competition of competitions) {
+    const { matches, requestsAvailableMinute } = await client.listFinishedMatches({ competition });
+    fdMatches.push(...matches);
+    if (Number.isFinite(requestsAvailableMinute)) {
+      out(`football-data.org [${competition}] requests available this minute: ${requestsAvailableMinute}\n`);
+    }
+  }
+
+  const settled = settlePaperBets(rows, synthesizeFdScoreEvents(pending, fdMatches));
+  await writeCsv(ledgerPath, settled, PAPER_COLUMNS);
+  printPaperSummary(out, settled);
+  out("Settled soccer bets via football-data.org (free) — no The Odds API credits spent.\n");
   return 0;
 }
 
@@ -1111,6 +1155,8 @@ export async function runCli(argv, deps = {}) {
     loadRegistry = loadSportRegistry,
     runMispricing = runMispricingScan,
     sportMapPath = DEFAULT_SPORT_MAP,
+    loadFootballDataKey = defaultLoadFootballDataKey,
+    createFootballDataClient: createFdClient = createFootballDataClient,
   } = deps;
 
   const [command, ...rest] = argv;
@@ -1139,6 +1185,11 @@ export async function runCli(argv, deps = {}) {
     if (command === "settle") {
       return await runSettle({
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+      });
+    }
+    if (command === "fd-settle") {
+      return await runFdSettle({
+        loadFootballDataKey, createFootballDataClient: createFdClient, out, reportsDir,
       });
     }
     if (command === "clv") {
@@ -1222,7 +1273,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | fd-settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

@@ -398,6 +398,16 @@ these in order; all are free/cheap and must follow the §0 rules and TDD.
    a SEPARATE, reviewed change with the data attached.
 5. **P3 (3rd reference provider) stays deprioritized** — the 2026-06-26 audit showed
    the bottleneck is candidate EV before confirmation, not reference coverage.
+6. **Free settlement: DONE 2026-06-27 (soccer).** New `fd-settle` command settles
+   soccer/World Cup paper bets for FREE via football-data.org (`football_data_client.mjs`
+   + `football_data_settle.mjs`, key `football_data_org_key`, header `X-Auth-Token`,
+   10 req/min). `run-paper-settle.ps1` runs `fd-settle` first, then `settle` for the
+   rest — so The Odds API credits are reserved for CLV. **Next: extend free settlement
+   to NON-soccer (MLB/NFL/NPB) via TheSportsDB** (key `sports_db_key` is set, but the v1
+   `eventspastleague id=4429` probe returned HTTP 400 — find the right league id or use
+   v2 `X-API-KEY`; mirror the football-data pattern). Soccer name-matching uses
+   normalized names + date; watch club-league name mismatches when expanding beyond
+   national teams.
 
 ### Decision 2026-06-27 — SportsGameOdds (SGO): DO NOT integrate yet
 

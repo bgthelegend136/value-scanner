@@ -224,12 +224,16 @@ odds, EV, tier, and timestamp are retained.
 Settle completed bets with:
 
 ```text
-node src/cli.mjs settle
+node src/cli.mjs fd-settle   # FREE: settles soccer/World Cup via football-data.org
+node src/cli.mjs settle      # The Odds API: settles the non-soccer remainder
 ```
 
-`settle` requests World Cup scores for the previous three days, updates
-`PENDING` bets to `WON`, `LOST`, `PUSH`, or `REVIEW`, and prints settled stake,
-net paper profit, and realized ROI:
+`fd-settle` settles soccer paper bets for **free** via football-data.org
+(`football_data_org_key`, 10 req/min), matching on normalized team names + date,
+so The Odds API credits stay reserved for CLV. Run it before `settle`. `settle`
+then requests scores for any league football-data does not cover (Brazil Série B,
+baseball, NFL, …), updates `PENDING` bets to `WON`, `LOST`, `PUSH`, or `REVIEW`,
+and prints settled stake, net paper profit, and realized ROI:
 
 `ROI = settled paper profit / settled paper stake`
 
