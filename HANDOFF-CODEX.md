@@ -1,8 +1,8 @@
 # Handoff to Codex: Multi-Sport Mispricing Telegram Alerts
 
 **Date:** 2026-06-26  
-**Branch:** `codex/multisport-mispricing-alerts`  
-**Repo root:** `C:\Users\bgthe\Documents\bet\.worktrees\multisport-mispricing-alerts`  
+**Branch:** `master` (consolidated 2026-06-26 — the `codex/*` worktree branches were merged into `master`; one branch, one folder)  
+**Repo root:** `C:\Users\bgthe\Documents\bet`  
 **Working dir for commands:** `provider-harness/`  
 **Runtime:** Node.js >= 22, ES modules, built-in `fetch`, `node:test`. No runtime npm dependencies.
 
@@ -33,6 +33,24 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 ---
 
 ## 2. Current state
+
+> **Status update 2026-06-26.** Repo consolidated to `master` in the main folder
+> (worktrees removed). `node --test` -> **175/175 passing**. The three Windows
+> scheduled tasks are **registered and ran successfully** from the main folder
+> (`LastTaskResult=0`); the Scanner's first real live cycle produced
+> `candidates:2 → mapped:0 → confirmed:0 → sent:0` with zero API/Telegram failures
+> — i.e. it is **live and fail-closing correctly**. The Scanner repeats every 15 min
+> but only while the PC is awake.
+>
+> **Diagnosis of why 0 alerts (audit, 101 rows):** the dominant filter is the
+> candidate **EV floor**, not coverage — 96/101 rejected as `CANDIDATE_EV_BELOW_MIN`,
+> 3 stale, only 2 `UNMAPPED_SPORT_LEAGUE` (Chile Copa Chile Group C). World Cup
+> candidates DO appear and map fine (not lost to naming); they simply lack a 10% edge.
+> EV snapshot: max edge ~4%, nothing ≥5%. So **≥10% mispricings are genuinely rare
+> right now**, and a 3rd reference provider (P3) would not change this — the bottleneck
+> is candidate EV *before* confirmation. Next step is data accumulation, then a
+> calibration decision on the 10% floor. The "uncommitted boost-mix" note below is
+> historical — that work is now committed on `master`.
 
 - All tests were green after the latest boost-mix work: `npm test` / `node --test` -> 152/152 passing.
 - P1 CLV feedback loop is shipped. Sent alerts are snapshotted to `reports/mispricing-clv.csv`; `mispricing-clv` captures Pinnacle closing line and reports realized CLV. Scheduling CLV capture is still open.
@@ -178,9 +196,21 @@ Delivered:
 
 The production scanner is not registered on the machine.
 
-### P3 - Wider confirmation coverage: OPEN
+### P3 - Wider confirmation coverage: OPEN (re-prioritized 2026-06-26)
 
-Highest leverage for automated alert volume. Current confirmation depends on The Odds API carrying the same league/event. Add an optional second sharp reference source as a substitute when Pinnacle/The Odds API coverage is missing, without weakening dual confirmation or EV floors.
+Plumbing for an optional second sharp reference source is built (`referenceSource`
+recorded on every row), but it is NOT live — no third independent provider key is
+available, and using Odds-API.io as both candidate and reference would be circular.
+
+**Re-prioritization note:** the 2026-06-26 audit shows confirmation coverage is NOT
+the current bottleneck. 95% of rejects are `CANDIDATE_EV_BELOW_MIN` (candidate EV
+below the 10% floor, before any reference call); only 2/101 were `UNMAPPED`. So a
+third reference provider would not increase alert volume right now — the candidates
+do not clear the EV floor in the first place. Keep P3 plumbing, but the higher-value
+work is data accumulation + a 10% floor calibration decision once real confirmed-EV
+data exists. Original intent retained below for when candidate volume above the floor
+returns: add an optional second sharp reference as a substitute when The Odds API
+coverage is missing, without weakening dual confirmation or EV floors.
 
 ### P4 - Event matching aliases and near-miss logging: OPEN
 
