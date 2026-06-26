@@ -169,13 +169,19 @@ A per-stratum summary CSV is written to `reports/`.
 ### `scan`
 
 ```
-node src/cli.mjs scan [--edge=5]
+node src/cli.mjs scan [--edge=2]
 ```
 
-Finds **positive-EV value bets** on upcoming FIFA World Cup matches by comparing
-the bettable Greek-market books (**Stoiximan**, **Superbet** via Odds-API.io)
-against **Pinnacle's de-vigged fair price** (via The Odds API). Requires both
-keys in `.env.local`: `ODDS_API_IO_KEY` and `THE_ODDS_API_KEY`.
+Finds **positive-EV value bets** across **every in-season league mapped in
+`config/multisport-map.json`** (World Cup, Brazil Série A/B, EPL, Serie A,
+League of Ireland, Superettan, MLB, NPB, NFL, …) by comparing the bettable
+Greek-market books (**Stoiximan**, **Superbet** via Odds-API.io) against
+**Pinnacle's de-vigged fair price** (via The Odds API). Only leagues whose
+reference sport is currently active are scanned. Default edge is **2%** (the
+realistic sharp edge; this paper-bet path sends nothing to Telegram, so it is
+deliberately looser than the 10% live-alert floor). Each paper bet records its
+`sportKey` so `clv`/`settle` query the right sport. Requires both keys in
+`.env.local`: `ODDS_API_IO_KEY` and `THE_ODDS_API_KEY`.
 
 Flow: discover World Cup fixtures from The Odds API; match them to Odds-API.io
 fixtures by kickoff + team name (national-team aliases handled); de-vig

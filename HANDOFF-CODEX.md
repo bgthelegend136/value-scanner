@@ -51,6 +51,15 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 > is candidate EV *before* confirmation. Next step is data accumulation, then a
 > calibration decision on the 10% floor. The "uncommitted boost-mix" note below is
 > historical — that work is now committed on `master`.
+>
+> **Multi-league paper scanner (2026-06-26).** To accelerate data collection
+> WITHOUT touching the 10% live-alert safety rule, the legacy `scan` command (paper
+> + CLV path, no Telegram) was generalised from World-Cup-only to **every in-season
+> league in `multisport-map.json`**, default edge **2%**. Paper bets now carry a
+> `sportKey`; `clv`/`settle` group pending bets by sport. First live run: 10 leagues,
+> 35 fixtures; CLV on 16 paper bets showed beat rate 93%, avg +2.1% (n=15, World Cup,
+> one snapshot — indicative only). 178 tests green. The mispricing-scan/Telegram path
+> is unchanged and still gated at 10%.
 
 - All tests were green after the latest boost-mix work: `npm test` / `node --test` -> 152/152 passing.
 - P1 CLV feedback loop is shipped. Sent alerts are snapshotted to `reports/mispricing-clv.csv`; `mispricing-clv` captures Pinnacle closing line and reports realized CLV. Scheduling CLV capture is still open.
