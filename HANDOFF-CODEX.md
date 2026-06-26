@@ -34,6 +34,17 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (Codex free settlement probes).** The owner added
+> `api_sports_key` and `highlightly_key`; both were probed without printing
+> secrets. API-Sports is the best free replacement candidate for Part B:
+> football/baseball/basketball/hockey all returned HTTP 200, 100-request daily
+> limits, and usable final-score fields (`FT`, totals/fulltime scores).
+> Highlightly is viable as a backup for baseball/basketball/hockey, but is less
+> clean: baseball/basketball returned completed score rows, hockey had no rows on
+> the tested date, and the documented football direct host returned DNS failure.
+> Recommendation: do not buy TheSportsDB Premium now; when non-soccer paper bets
+> appear, build an API-Sports settlement adapter first, with Highlightly only as
+> fallback/probe.
 > **Status update 2026-06-27 (Codex token window).** Part A of the
 > API-token plan is done. `scan` now has a quota guard (`MIN_SCAN_QUOTA = 60`)
 > that stops the multi-league paper scan before The Odds API credits can be
@@ -422,6 +433,13 @@ these in order; all are free/cheap and must follow the §0 rules and TDD.
    non-soccer settlement adapter unless the owner chooses TheSportsDB Premium.
    For now, non-soccer fallback settlement stays on The Odds API. This is cheap
    enough because there are no non-soccer paper bets yet.
+8. **Free non-soccer settlement probe: API-Sports preferred 2026-06-27.**
+   `api_sports_key` works across football/baseball/basketball/hockey and returns
+   final-score structures suitable for settlement. `highlightly_key` works for
+   baseball/basketball/hockey but needs stricter filtering and football direct
+   host follow-up. If non-soccer paper bets begin accumulating or The Odds API
+   settlement burn becomes material, implement API-Sports first; keep Highlightly
+   as secondary fallback only.
 
 ### Decision 2026-06-27 — SportsGameOdds (SGO): DO NOT integrate yet
 
