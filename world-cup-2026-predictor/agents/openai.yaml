@@ -1,0 +1,4 @@
+interface:
+  display_name: "World Cup 2026 Predictor"
+  short_description: "Predict 2026 World Cup matches"
+  default_prompt: "Use $world-cup-2026-predictor to predict Mexico vs South Africa in the 2026 World Cup."
