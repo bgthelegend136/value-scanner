@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -23,6 +23,7 @@ import {
   paperSportKey,
   settlePaperBets,
   summarizeClv,
+  summarizeClvTrend,
   summarizePaperBets,
 } from "./paper.mjs";
 import { createValueBetsClient } from "./value_bets_client.mjs";
@@ -571,6 +572,55 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
   return 0;
 }
 
+const CLV_REPORT_COLUMNS = [
+  "scope", "key", "captured", "positive", "beatRate", "averageClv",
+];
+
+function clvReportRow(row) {
+  return {
+    scope: row.scope,
+    key: row.key,
+    captured: String(row.captured),
+    positive: String(row.positive),
+    beatRate: row.beatRate === null ? "" : row.beatRate.toFixed(4),
+    averageClv: row.averageClv === null ? "" : row.averageClv.toFixed(4),
+  };
+}
+
+async function runClvReport({ out, reportsDir, now }) {
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  if (!await defaultFileExists(ledgerPath)) {
+    out("No paper-bet ledger found. Run scan first.\n");
+    return 0;
+  }
+
+  const rows = await readCsv(ledgerPath);
+  const reportRows = summarizeClvTrend(rows);
+  const csvRows = reportRows.map(clvReportRow);
+  const generatedAt = now().toISOString();
+  await writeCsv(join(reportsDir, "clv-report.csv"), csvRows, CLV_REPORT_COLUMNS);
+  await writeFile(
+    join(reportsDir, "clv-report.json"),
+    `${JSON.stringify({ generatedAt, rows: csvRows }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const overall = reportRows.find((row) => row.scope === "overall" && row.key === "all") ?? {
+    captured: 0, positive: 0, beatRate: null, averageClv: null,
+  };
+  const beatRate = overall.beatRate === null ? "N/A" : `${(overall.beatRate * 100).toFixed(1)}%`;
+  const averageClv = overall.averageClv === null ? "N/A" : `${signed(overall.averageClv * 100, 1)}%`;
+  out(
+    [
+      `CLV report: ${overall.captured} captured`,
+      `Positive CLV (beat the close): ${overall.positive}`,
+      `Beat rate: ${beatRate}`,
+      `Average CLV: ${averageClv}`,
+      `Wrote ${csvRows.length} summary rows to ${join(reportsDir, "clv-report.csv")}`,
+    ].join("\n") + "\n",
+  );
+  return 0;
+}
 // Capture closing-line value for sent mispricing alerts. Reuses the same Pinnacle
 // de-vig + applyClosingLine/summarizeClv machinery as paper-bet CLV, but reads the
 // mispricing alert ledger and queries each sport once, limited to tracked events.
@@ -1040,6 +1090,9 @@ export async function runCli(argv, deps = {}) {
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
       });
     }
+    if (command === "clv-report") {
+      return await runClvReport({ out, reportsDir, now });
+    }
     if (command === "mispricing-clv") {
       return await runMispricingClv({
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
@@ -1108,7 +1161,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | clv-report | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

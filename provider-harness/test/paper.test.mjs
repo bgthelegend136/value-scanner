@@ -8,6 +8,7 @@ import {
   paperBetKey,
   settlePaperBets,
   summarizeClv,
+  summarizeClvTrend,
   summarizePaperBets,
 } from "../src/paper.mjs";
 
@@ -220,4 +221,32 @@ test("summarizes CLV beat rate and average", () => {
   assert.equal(summary.positive, 1);
   assert.equal(summary.beatRate, 0.5);
   assert.ok(Math.abs(summary.averageClv - 0.075) < 1e-9);
+});
+test("summarizes CLV trend overall, per sport, and per capture day", () => {
+  const rows = [
+    pending({
+      sportKey: "soccer_fifa_world_cup",
+      clv: "0.200000",
+      clvCapturedAt: "2026-06-25T17:55:00.000Z",
+    }),
+    pending({
+      sportKey: "soccer_brazil_serie_b",
+      clv: "-0.050000",
+      clvCapturedAt: "2026-06-25T21:55:00.000Z",
+    }),
+    pending({
+      sportKey: "soccer_fifa_world_cup",
+      clv: "0.100000",
+      clvCapturedAt: "2026-06-26T17:55:00.000Z",
+    }),
+    pending({ clv: "" }),
+  ];
+
+  assert.deepEqual(summarizeClvTrend(rows), [
+    { scope: "overall", key: "all", captured: 3, positive: 2, beatRate: 2 / 3, averageClv: 0.08333333333333333 },
+    { scope: "sportKey", key: "soccer_brazil_serie_b", captured: 1, positive: 0, beatRate: 0, averageClv: -0.05 },
+    { scope: "sportKey", key: "soccer_fifa_world_cup", captured: 2, positive: 2, beatRate: 1, averageClv: 0.15000000000000002 },
+    { scope: "captureDate", key: "2026-06-25", captured: 2, positive: 1, beatRate: 0.5, averageClv: 0.07500000000000001 },
+    { scope: "captureDate", key: "2026-06-26", captured: 1, positive: 1, beatRate: 1, averageClv: 0.1 },
+  ]);
 });

@@ -34,8 +34,14 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-26 (Codex clv-report).** Added a no-quota `clv-report`
+> command for the paper ledger. It reads `provider-harness/reports/paper-bets.csv`
+> and writes `reports/clv-report.csv` + `reports/clv-report.json`, grouped overall,
+> by `sportKey`, and by CLV capture date. Current local report: 15 captured paper
+> CLV rows, 14 positive, beat rate 93.3%, average CLV +2.2%. This is still a small
+> sample and does not change the 10% Telegram alert floor.
 > **Status update 2026-06-26.** Repo consolidated to `master` in the main folder
-> (worktrees removed). `node --test` -> **175/175 passing**. The three Windows
+> (worktrees removed). `node --test` -> **182/182 passing**. The three Windows
 > scheduled tasks are **registered and ran successfully** from the main folder
 > (`LastTaskResult=0`); the Scanner's first real live cycle produced
 > `candidates:2 → mapped:0 → confirmed:0 → sent:0` with zero API/Telegram failures
@@ -351,7 +357,7 @@ these in order; all are free/cheap and must follow the §0 rules and TDD.
    (cross-check the live `/sports` active list). Add the pairs to
    `config/multisport-map.json` and title aliases to `multisport_map.mjs`. This
    widens the paper funnel without weakening any rule.
-2. **CLV trend report.** Add a `clv-report` command (or extend `clv`) that reads
+2. **CLV trend report: DONE 2026-06-26.** Added a `clv-report` command that reads
    `paper-bets.csv` and summarises **beat-rate and average CLV over time and per
    `sportKey`** — not just the current capture. This is the metric the owner uses
    to decide if the edge is real. Persist a small CSV/JSON summary under `reports/`.

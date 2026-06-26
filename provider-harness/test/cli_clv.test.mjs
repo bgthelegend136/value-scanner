@@ -145,3 +145,42 @@ test("clv spends no quota with no ledger or no pending bets", async () => {
   assert.equal(await runCli(["clv"], deps), 0);
   assert.equal(calls, 0);
 });
+test("clv-report writes trend summaries without spending API quota", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-report-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ sportKey: "soccer_fifa_world_cup", clv: "0.200000", clvCapturedAt: "2026-06-25T17:55:00.000Z" }),
+    paperRow({ sportKey: "soccer_brazil_serie_b", clv: "-0.050000", clvCapturedAt: "2026-06-25T21:55:00.000Z" }),
+    paperRow({ sportKey: "soccer_fifa_world_cup", clv: "0.100000", clvCapturedAt: "2026-06-26T17:55:00.000Z" }),
+    paperRow({ sportKey: "soccer_fifa_world_cup", clv: "", clvCapturedAt: "" }),
+  ], PAPER_COLUMNS);
+  let out = "";
+  const code = await runCli(["clv-report"], {
+    out: (text) => { out += text; },
+    err: () => {},
+    reportsDir,
+    now: () => new Date("2026-06-27T08:00:00.000Z"),
+    loadTheOddsKey: async () => { throw new Error("must not load key"); },
+    createTheOddsClient: () => { throw new Error("must not create client"); },
+  });
+
+  assert.equal(code, 0);
+  assert.match(out, /CLV report: 3 captured/);
+  assert.match(out, /Beat rate: 66\.7%/);
+  assert.match(out, /Average CLV: \+8\.3%/);
+
+  const csv = await readCsv(join(reportsDir, "clv-report.csv"));
+  assert.deepEqual(
+    csv.map((row) => `${row.scope}:${row.key}:${row.captured}:${row.positive}:${row.beatRate}:${row.averageClv}`),
+    [
+      "overall:all:3:2:0.6667:0.0833",
+      "sportKey:soccer_brazil_serie_b:1:0:0.0000:-0.0500",
+      "sportKey:soccer_fifa_world_cup:2:2:1.0000:0.1500",
+      "captureDate:2026-06-25:2:1:0.5000:0.0750",
+      "captureDate:2026-06-26:1:1:1.0000:0.1000",
+    ],
+  );
+
+  const json = JSON.parse(await readFile(join(reportsDir, "clv-report.json"), "utf8"));
+  assert.equal(json.generatedAt, "2026-06-27T08:00:00.000Z");
+  assert.equal(json.rows.length, 5);
+});

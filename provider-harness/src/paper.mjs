@@ -251,3 +251,47 @@ export function summarizeClv(rows) {
     averageClv: captured > 0 ? total / captured : null,
   };
 }
+function emptyClvBucket(scope, key) {
+  return { scope, key, captured: 0, positive: 0, total: 0 };
+}
+
+function addClvBucket(buckets, scope, key, clv) {
+  const id = `${scope}|${key}`;
+  if (!buckets.has(id)) buckets.set(id, emptyClvBucket(scope, key));
+  const bucket = buckets.get(id);
+  bucket.captured += 1;
+  bucket.total += clv;
+  if (clv > 0) bucket.positive += 1;
+}
+
+function finishClvBucket(bucket) {
+  return {
+    scope: bucket.scope,
+    key: bucket.key,
+    captured: bucket.captured,
+    positive: bucket.positive,
+    beatRate: bucket.captured > 0 ? bucket.positive / bucket.captured : null,
+    averageClv: bucket.captured > 0 ? bucket.total / bucket.captured : null,
+  };
+}
+
+export function summarizeClvTrend(rows) {
+  const buckets = new Map();
+  for (const row of rows) {
+    if (!row.clv) continue;
+    const clv = Number(row.clv);
+    if (!Number.isFinite(clv)) continue;
+    addClvBucket(buckets, "overall", "all", clv);
+    addClvBucket(buckets, "sportKey", paperSportKey(row), clv);
+    const capturedAt = Date.parse(row.clvCapturedAt);
+    if (Number.isFinite(capturedAt)) {
+      addClvBucket(buckets, "captureDate", new Date(capturedAt).toISOString().slice(0, 10), clv);
+    }
+  }
+  const order = new Map([["overall", 0], ["sportKey", 1], ["captureDate", 2]]);
+  return [...buckets.values()]
+    .map(finishClvBucket)
+    .sort((left, right) =>
+      order.get(left.scope) - order.get(right.scope) || left.key.localeCompare(right.key),
+    );
+}
