@@ -34,6 +34,26 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (paid plan + WebSocket trial — roadmap).** The owner
+> bought **The Odds API 20K plan (€30/mo)** → historical odds + 40× the old free
+> credits (20,000 vs 500). Odds-API.io also granted a **2-day free WebSocket add-on**.
+> New roadmap: `docs/superpowers/plans/2026-06-27-post-paid-plan-roadmap.md`. Four
+> workstreams, all paper/measurement only, none touch the 10% Telegram floor or place
+> bets: **(A)** relax the quota guards (`MIN_SCAN_QUOTA` in `cli.mjs`, `QUOTA_RESERVE`
+> in `mispricing_scan.mjs`; reserve ~1,000 cr for CLV) and re-enable continuous
+> `Bet-Paper-Scan` to grow forward CLV faster; **(B)** lean historical de-vig
+> calibration (1 league, ½ season ≈ 3,800 cr) — add `getHistoricalOdds` to
+> `theodds_client.mjs`, build `scripts/historical-calibration.mjs`, reliability/Brier/
+> log-loss on an OOS split; pre-flight that football-data.org free covers the outcome
+> window; NOT a strategy backtest (no soft books in historical); **(C)** **measure-only**
+> WebSocket instrument `scripts/ws-lifetime-probe.mjs` (Node 22 built-in `WebSocket`, no
+> dep) to log fleeting-edge lifetimes during the 2-day trial and decide buy/don't-buy —
+> motivated by Stoiximan Iraq 17→12 vs Senegal; **(D)** live betting (P8) = scope-only
+> groundwork (faster in-play alerts to the human, never auto-betting). A zero-credit
+> go/no-go probe + verified cost model already exists: `scripts/historical-probe.mjs`.
+> Standing diagnosis unchanged: bottleneck is the candidate EV floor, not coverage.
+> 203/203 tests green at handoff; nothing implemented from this roadmap yet.
+>
 > **Status update 2026-06-27 (P4 paper coverage mapping).** Added 8
 > paper-scan registry mappings from the Cursor/Odds-API.io probe after a fresh
 > zero-cost The Odds API `/sports` check confirmed all reference keys active:
@@ -371,9 +391,15 @@ Manual boost analysis now normalizes these event-level markets where The Odds AP
 
 This is not wired into automated alerts. Before alerting on any market beyond `MATCH_RESULT`, add market-specific candidate normalization, exact line matching, Pinnacle+3-book consensus verification, audit rows, and tests.
 
-### P8 - Live/in-play mistakes: OPEN
+### P8 - Live/in-play mistakes: OPEN (scoping started 2026-06-27)
 
 Likely where the biggest mistakes are, but needs a live odds source and faster loop. Scope before building. Keep pre-match flow and CLV data as the proof base first.
+
+First concrete step is the **measure-only WebSocket instrument** (Workstream C of `docs/superpowers/plans/2026-06-27-post-paid-plan-roadmap.md`): use the Odds-API.io WebSocket trial to measure fleeting-edge lifetimes (the Iraq 17→12 case) before committing to any live pipeline. Building blocks for later: Odds-API.io `scores`/`status` channels, `/events/live`, `/odds/movements`. Under §0 #2 this stays *faster alerts to the human*, never auto-betting.
+
+### P9 - Historical de-vig calibration: OPEN (new 2026-06-27)
+
+The €30 plan unlocks historical odds. Lean first pass (1 league, ½ season ≈ 3,800 cr): de-vig closing snapshots, join to free football-data.org outcomes, score reliability/Brier/log-loss on an OOS split to judge fair-value calibration — the evidence needed before any calibrated change to the 10% floor. See Workstream B of the roadmap. Pre-flight the outcome-source coverage before the full credit spend.
 
 ---
 
