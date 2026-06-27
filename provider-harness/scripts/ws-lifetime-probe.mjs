@@ -1,8 +1,8 @@
 // Measurement-only Odds-API.io WebSocket probe.
 //
-// It records how long soft-book price windows stay above a configured odds
-// threshold. The WebSocket odds channel does not include EV; the CSV keeps
-// providerExpectedValue blank until a later reference cross-check is added.
+// It records how long Stoiximan/Novibet WebSocket prices remain strict confirmed
+// +EV under the same rule as Telegram alerts: Pinnacle fair probability plus
+// 3-book consensus EV must both clear the 10% floor. It sends no alerts.
 
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -10,18 +10,35 @@ import { fileURLToPath } from "node:url";
 
 import { resolveEnvPath } from "../src/cli.mjs";
 import { readCsv, writeCsv } from "../src/csv.mjs";
-import { loadEnvFile, requireApiKey } from "../src/env.mjs";
+import { loadEnvFile, requireApiKey, requireKey } from "../src/env.mjs";
+import { confirmCandidate } from "../src/mispricing_confirm.mjs";
+import { matchCandidateEvent } from "../src/mispricing_match.mjs";
+import { candidateIdentity } from "../src/mispricing_state.mjs";
+import { loadSportRegistry, resolveSportKey } from "../src/multisport_map.mjs";
+import { createTheOddsApiClient } from "../src/theodds_client.mjs";
+import { normalizeTheOddsResponse } from "../src/theodds_normalize.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPORTS_DIR = resolve(HERE, "..", "reports");
+const DEFAULT_SPORT_MAP = resolve(HERE, "..", "config", "multisport-map.json");
 const DEFAULT_WS_BASE_URL = "wss://api.odds-api.io/v3/ws";
 const TARGET_BOOKMAKERS = new Set(["Stoiximan", "Novibet"]);
-const CSV_COLUMNS = [
+const LEGACY_CSV_COLUMNS = [
   "openedAt", "closedAt", "lifetimeSeconds",
   "eventId", "bookmaker", "market", "line", "outcome",
   "firstOdds", "peakOdds", "lastOdds", "minOdds",
   "startSeq", "endSeq", "startTimestamp", "endTimestamp",
   "endReason", "providerExpectedValue",
+];
+const STRICT_CSV_COLUMNS = [
+  "openedAt", "closedAt", "lifetimeSeconds",
+  "providerEventId", "referenceEventId", "sportKey",
+  "bookmaker", "match", "market", "line", "outcome",
+  "firstOdds", "peakOdds", "lastOdds",
+  "firstPinnacleEv", "peakPinnacleEv", "lastPinnacleEv",
+  "firstConsensusEv", "peakConsensusEv", "lastConsensusEv",
+  "consensusBooks", "minimumConfirmedEv", "edgeOverDispersion",
+  "startSeq", "endSeq", "startTimestamp", "endTimestamp", "endReason",
 ];
 
 function option(argv, name, fallback = undefined) {
@@ -44,6 +61,24 @@ function splitOption(argv, name) {
 function finiteOdds(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
+}
+
+function text(value) {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object") return String(value.name ?? value.title ?? "").trim();
+  return "";
+}
+
+function slug(value) {
+  if (value && typeof value === "object" && value.slug) {
+    return String(value.slug).trim().toLowerCase();
+  }
+  return text(value)
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "");
 }
 
 function isoFromTimestamp(timestamp, fallback = new Date()) {
@@ -118,6 +153,50 @@ function extractMlSelections(message) {
   return selections;
 }
 
+function eventDetails(message) {
+  const event = message.event ?? {};
+  return {
+    home: text(event.home ?? event.homeTeam ?? event.home_team ?? message.home ?? message.homeTeam),
+    away: text(event.away ?? event.awayTeam ?? event.away_team ?? message.away ?? message.awayTeam),
+    date: event.date ?? event.commence_time ?? event.kickoffUtc ?? message.date ?? message.commence_time,
+    sport: event.sport ?? message.sport,
+    league: event.league ?? message.league,
+  };
+}
+
+function extractWsCandidates(message, { targetBookmakers = TARGET_BOOKMAKERS, now = new Date() } = {}) {
+  const bookmaker = String(message.bookie ?? message.bookmaker ?? "");
+  if (targetBookmakers?.size && !targetBookmakers.has(bookmaker)) return [];
+  const details = eventDetails(message);
+  const kickoff = new Date(details.date);
+  if (!details.home || !details.away || !Number.isFinite(kickoff.getTime())) return [];
+  const timestamp = Number.isFinite(Number(message.timestamp))
+    ? Number(message.timestamp)
+    : Math.floor(new Date(now).getTime() / 1000);
+  const valueUpdatedAt = isoFromTimestamp(timestamp, now);
+  return extractMlSelections({ ...message, bookie: bookmaker }).map((selection) => ({
+    candidateId: `${message.id}-${bookmaker}-${selection.market}-${selection.line}-${selection.outcome}`,
+    providerEventId: String(message.id),
+    bookmaker,
+    providerExpectedValue: "",
+    sportSlug: slug(details.sport),
+    leagueSlug: slug(details.league),
+    sportName: text(details.sport),
+    leagueName: text(details.league),
+    kickoffUtc: kickoff.toISOString(),
+    participantOne: details.home,
+    participantTwo: details.away,
+    market: selection.market,
+    line: selection.line,
+    outcome: selection.outcome,
+    offeredOdds: selection.decimalOdds,
+    valueUpdatedAt,
+    receivedAt: valueUpdatedAt,
+    link: "",
+    linkDepth: "NONE",
+  }));
+}
+
 function identity(selection) {
   return [
     selection.eventId,
@@ -156,6 +235,58 @@ function closeEntry(entry, { reason, timestamp, seq, latestOdds = entry.lastOdds
   };
 }
 
+function formatNumber(value, digits = 4) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(digits) : "";
+}
+
+function closeStrictEntry(entry, {
+  reason,
+  timestamp,
+  seq,
+  candidate = null,
+  confirmation = null,
+}) {
+  const startMs = Number(entry.startTimestamp) * 1000;
+  const endMs = Number(timestamp) * 1000;
+  const lifetimeSeconds = Number.isFinite(startMs) && Number.isFinite(endMs)
+    ? Math.max(0, (endMs - startMs) / 1000)
+    : 0;
+  const lastOdds = candidate?.offeredOdds ?? entry.lastOdds;
+  const lastPinnacleEv = confirmation?.pinnacleEv ?? entry.lastPinnacleEv;
+  const lastConsensusEv = confirmation?.consensusEv ?? entry.lastConsensusEv;
+  return {
+    openedAt: entry.openedAt,
+    closedAt: isoFromTimestamp(timestamp),
+    lifetimeSeconds: lifetimeSeconds.toFixed(3),
+    providerEventId: entry.providerEventId,
+    referenceEventId: entry.referenceEventId,
+    sportKey: entry.sportKey,
+    bookmaker: entry.bookmaker,
+    match: `${entry.participantOne} - ${entry.participantTwo}`,
+    market: entry.market,
+    line: entry.line,
+    outcome: entry.outcome,
+    firstOdds: formatNumber(entry.firstOdds),
+    peakOdds: formatNumber(entry.peakOdds),
+    lastOdds: formatNumber(lastOdds),
+    firstPinnacleEv: formatNumber(entry.firstPinnacleEv),
+    peakPinnacleEv: formatNumber(entry.peakPinnacleEv),
+    lastPinnacleEv: formatNumber(lastPinnacleEv),
+    firstConsensusEv: formatNumber(entry.firstConsensusEv),
+    peakConsensusEv: formatNumber(entry.peakConsensusEv),
+    lastConsensusEv: formatNumber(lastConsensusEv),
+    consensusBooks: String(confirmation?.consensusBooks ?? entry.consensusBooks ?? ""),
+    minimumConfirmedEv: formatNumber(confirmation?.minimumConfirmedEv ?? entry.minimumConfirmedEv),
+    edgeOverDispersion: formatNumber(confirmation?.edgeOverDispersion ?? entry.edgeOverDispersion),
+    startSeq: entry.startSeq,
+    endSeq: seq ?? "",
+    startTimestamp: entry.startTimestamp,
+    endTimestamp: timestamp ?? "",
+    endReason: reason,
+  };
+}
+
 function closeMatching(state, predicate, context) {
   const closed = [];
   for (const [key, entry] of [...state.active]) {
@@ -164,6 +295,54 @@ function closeMatching(state, predicate, context) {
     state.active.delete(key);
   }
   return closed;
+}
+
+function closeStrictMatching(state, predicate, context) {
+  const closed = [];
+  for (const [key, entry] of [...state.active]) {
+    if (!predicate(entry)) continue;
+    closed.push(closeStrictEntry(entry, context));
+    state.active.delete(key);
+  }
+  return closed;
+}
+
+function openOrUpdateStrict(state, candidate, confirmation, { sportKey, timestamp, seq }) {
+  const key = candidateIdentity(candidate);
+  const active = state.active.get(key);
+  if (active) {
+    active.lastOdds = candidate.offeredOdds;
+    active.peakOdds = Math.max(active.peakOdds, candidate.offeredOdds);
+    active.lastPinnacleEv = confirmation.pinnacleEv;
+    active.peakPinnacleEv = Math.max(active.peakPinnacleEv, confirmation.pinnacleEv);
+    active.lastConsensusEv = confirmation.consensusEv;
+    active.peakConsensusEv = Math.max(active.peakConsensusEv, confirmation.consensusEv);
+    active.minimumConfirmedEv = confirmation.minimumConfirmedEv;
+    active.edgeOverDispersion = confirmation.edgeOverDispersion;
+    active.consensusBooks = confirmation.consensusBooks;
+    active.lastSeq = seq;
+    return;
+  }
+  state.active.set(key, {
+    ...candidate,
+    sportKey,
+    referenceEventId: confirmation.referenceEventId,
+    openedAt: isoFromTimestamp(timestamp),
+    startTimestamp: timestamp,
+    firstOdds: candidate.offeredOdds,
+    peakOdds: candidate.offeredOdds,
+    lastOdds: candidate.offeredOdds,
+    firstPinnacleEv: confirmation.pinnacleEv,
+    peakPinnacleEv: confirmation.pinnacleEv,
+    lastPinnacleEv: confirmation.pinnacleEv,
+    firstConsensusEv: confirmation.consensusEv,
+    peakConsensusEv: confirmation.consensusEv,
+    lastConsensusEv: confirmation.consensusEv,
+    consensusBooks: confirmation.consensusBooks,
+    minimumConfirmedEv: confirmation.minimumConfirmedEv,
+    edgeOverDispersion: confirmation.edgeOverDispersion,
+    startSeq: seq,
+  });
 }
 
 export function applyWsMessage(
@@ -243,14 +422,141 @@ export function applyWsMessage(
   return closed;
 }
 
+async function defaultReferenceSnapshot(referenceClient, sportKey) {
+  const events = await referenceClient.listEvents({ sportKey });
+  const odds = await referenceClient.getOdds({ sportKey, markets: "h2h" });
+  return {
+    events: events.data ?? [],
+    selections: normalizeTheOddsResponse(odds.data ?? [], odds.receivedAt),
+  };
+}
+
+export async function evaluateStrictEvMessage(
+  state,
+  message,
+  {
+    referenceClient,
+    registry = new Map(),
+    activeSports = [],
+    sportKey: explicitSportKey = "",
+    targetBookmakers = TARGET_BOOKMAKERS,
+    referenceSnapshot = null,
+    now = new Date(),
+  } = {},
+) {
+  if (message?.seq) state.lastSeq = Number(message.seq);
+  if (!message || message.type === "welcome" || message.type === "score" || message.type === "status") return [];
+  if (message.type === "resync_required") {
+    state.resyncRequired = message;
+    return [];
+  }
+
+  const timestamp = Number.isFinite(Number(message.timestamp))
+    ? Number(message.timestamp)
+    : Math.floor(new Date(now).getTime() / 1000);
+  const seq = message.seq ?? "";
+  const bookmaker = String(message.bookie ?? message.bookmaker ?? "");
+  if (targetBookmakers?.size && bookmaker && !targetBookmakers.has(bookmaker)) return [];
+
+  if (message.type === "deleted" || message.type === "no_markets") {
+    return closeStrictMatching(
+      state,
+      (entry) => entry.providerEventId === String(message.id) && (!bookmaker || entry.bookmaker === bookmaker),
+      { reason: message.type === "deleted" ? "DELETED" : "NO_MARKETS", timestamp, seq },
+    );
+  }
+  if (message.type !== "created" && message.type !== "updated") return [];
+
+  const candidates = extractWsCandidates(message, { targetBookmakers, now });
+  const activeKeys = new Set(activeSports.filter((sport) => sport.active !== false).map((sport) => sport.key));
+  const bySport = new Map();
+  const evaluations = new Map();
+
+  for (const candidate of candidates) {
+    const resolvedSportKey = explicitSportKey ||
+      resolveSportKey(candidate, registry, activeKeys, activeSports).sportKey;
+    const identity = candidateIdentity(candidate);
+    if (!resolvedSportKey) {
+      evaluations.set(identity, { candidate, confirmation: { status: "REJECTED", reason: "UNMAPPED_SPORT_LEAGUE" } });
+      continue;
+    }
+    if (!bySport.has(resolvedSportKey)) bySport.set(resolvedSportKey, []);
+    bySport.get(resolvedSportKey).push(candidate);
+  }
+
+  for (const [sportKey, sportCandidates] of bySport) {
+    let snapshot;
+    try {
+      snapshot = referenceSnapshot
+        ? await referenceSnapshot(sportKey)
+        : await defaultReferenceSnapshot(referenceClient, sportKey);
+    } catch {
+      for (const candidate of sportCandidates) {
+        evaluations.set(candidateIdentity(candidate), {
+          candidate,
+          sportKey,
+          confirmation: { status: "REJECTED", reason: "REFERENCE_PROVIDER_ERROR" },
+        });
+      }
+      continue;
+    }
+    for (const candidate of sportCandidates) {
+      const match = matchCandidateEvent(candidate, snapshot.events);
+      if (!match.event) {
+        evaluations.set(candidateIdentity(candidate), {
+          candidate,
+          sportKey,
+          confirmation: { status: "REJECTED", reason: match.reason },
+        });
+        continue;
+      }
+      const confirmation = confirmCandidate(candidate, match.event, snapshot.selections, { now: new Date(now) });
+      evaluations.set(candidateIdentity(candidate), { candidate, sportKey, confirmation });
+    }
+  }
+
+  const closed = [];
+  const seen = new Set(candidates.map((candidate) => candidateIdentity(candidate)));
+  for (const [identity, result] of evaluations) {
+    if (result.confirmation.status === "CONFIRMED") {
+      openOrUpdateStrict(state, result.candidate, result.confirmation, {
+        sportKey: result.sportKey,
+        timestamp,
+        seq,
+      });
+      continue;
+    }
+    const active = state.active.get(identity);
+    if (active) {
+      closed.push(closeStrictEntry(active, {
+        reason: result.confirmation.reason,
+        timestamp,
+        seq,
+        candidate: result.candidate,
+        confirmation: result.confirmation,
+      }));
+      state.active.delete(identity);
+    }
+  }
+
+  for (const [identity, active] of [...state.active]) {
+    if (active.providerEventId !== String(message.id) || active.bookmaker !== bookmaker) continue;
+    if (seen.has(identity)) continue;
+    closed.push(closeStrictEntry(active, { reason: "SELECTION_MISSING", timestamp, seq }));
+    state.active.delete(identity);
+  }
+
+  return closed;
+}
+
 async function fileExists(path) {
   return access(path).then(() => true, () => false);
 }
 
-async function appendCsvRows(path, rows) {
+async function appendCsvRows(path, rows, columns) {
   if (rows.length === 0) return;
   const existing = await fileExists(path) ? await readCsv(path) : [];
-  await writeCsv(path, [...existing, ...rows], CSV_COLUMNS);
+  await writeCsv(path, [...existing, ...rows], columns);
 }
 
 async function dataAsText(data) {
@@ -269,13 +575,25 @@ async function runProbe(argv = process.argv.slice(2)) {
   const envPath = await resolveEnvPath(process.cwd());
   const env = await loadEnvFile(envPath);
   const apiKey = requireApiKey(env);
+  const referenceClient = createTheOddsApiClient({ apiKey: requireKey(env, "THE_ODDS_API_KEY") });
+  const registry = await loadSportRegistry(DEFAULT_SPORT_MAP);
+  const sportsResponse = await referenceClient.listSports();
   const state = createLifetimeState();
   const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
   const outputPath = resolve(option(argv, "output", join(reportsDir, "ws-lifetime-log.csv")));
-  const minOdds = numericOption(argv, "min-odds", 5);
   const durationMinutes = numericOption(argv, "duration-minutes", 120);
+  const referenceTtlMs = numericOption(argv, "reference-ttl-seconds", 60) * 1000;
   const targetBookmakers = new Set(splitOption(argv, "bookmakers"));
   const effectiveBookmakers = targetBookmakers.size ? targetBookmakers : TARGET_BOOKMAKERS;
+  const explicitSportKey = option(argv, "sport-key", "");
+  const referenceCache = new Map();
+  const referenceSnapshot = async (sportKey) => {
+    const cached = referenceCache.get(sportKey);
+    if (cached && Date.now() - cached.cachedAt < referenceTtlMs) return cached.snapshot;
+    const snapshot = await defaultReferenceSnapshot(referenceClient, sportKey);
+    referenceCache.set(sportKey, { cachedAt: Date.now(), snapshot });
+    return snapshot;
+  };
   const startedAt = Date.now();
   const stopAt = startedAt + durationMinutes * 60_000;
   let reconnectAttempts = 0;
@@ -297,7 +615,7 @@ async function runProbe(argv = process.argv.slice(2)) {
 
     ws.onopen = () => {
       reconnectAttempts = 0;
-      console.log(`WebSocket connected; logging lifetimes >= ${minOdds.toFixed(2)} to ${outputPath}`);
+      console.log(`WebSocket connected; logging strict confirmed EV lifetimes to ${outputPath}`);
     };
 
     ws.onmessage = async (event) => {
@@ -310,8 +628,16 @@ async function runProbe(argv = process.argv.slice(2)) {
       if (message.type === "welcome") {
         console.log(`Welcome: channels=${(message.channels ?? []).join(",") || "?"}, bookmakers=${(message.bookmakers ?? []).join(",") || "?"}`);
       }
-      const rows = applyWsMessage(state, message, { minOdds, targetBookmakers: effectiveBookmakers });
-      await appendCsvRows(outputPath, rows);
+      const rows = await evaluateStrictEvMessage(state, message, {
+        referenceClient,
+        registry,
+        activeSports: sportsResponse.data ?? [],
+        sportKey: explicitSportKey,
+        targetBookmakers: effectiveBookmakers,
+        referenceSnapshot,
+        now: new Date(),
+      });
+      await appendCsvRows(outputPath, rows, STRICT_CSV_COLUMNS);
       if (rows.length) console.log(`Closed ${rows.length} lifetime row(s); lastSeq=${state.lastSeq || "?"}`);
       if (state.resyncRequired) {
         console.error(`resync_required: ${state.resyncRequired.reason ?? "unknown"}; reconnecting with latest seq after close`);

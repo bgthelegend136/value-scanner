@@ -101,9 +101,13 @@ Telegram / betting wiring (respects P8 "scope before building"). Stop when the t
 - [x] Subscribe to the **odds** channel for Stoiximan/Novibet on target sports. Log each
       value-bet candidate's **lifetime**: appear (created/updated over EV X) → disappear
       (deleted / updated below EV) with EV, odds, timestamps → `reports/ws-lifetime-log.csv`.
-      2026-06-27 Codex note: the WS odds payload does not carry EV, so v1 logs
-      high-price lifetime windows and leaves `providerExpectedValue` blank.
-- [ ] **Decision (record in WORKLOG):** if a meaningful share of real ≥5–10% edges live
+      2026-06-27 Codex note: after owner clarification, this is **not** a raw odds
+      or `--min-odds` probe. The script now cross-checks each WS update against
+      The Odds API and opens a lifetime only after the existing strict rule confirms
+      Pinnacle EV plus 3-book consensus EV over the 10% floor.
+      Decision input is strict confirmed >=10% +EV lifetime data, not raw 17->12
+      price movement.
+- [ ] **Decision (record in WORKLOG):** if a meaningful share of real strict ≥10% edges live
       **< ~2–5 min**, WebSocket pays for itself → propose buying it as a separate reviewed
       change. If they live **> ~10 min**, tighten polling cadence (Workstream A) instead —
       don't pay. Use the Iraq/Senegal case to see whether 17→12 was a catchable real edge

@@ -34,6 +34,19 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (WebSocket probe corrected to strict EV).** The
+> owner clarified that the Iraq 17→12 example was only a latency example; the
+> measurement target is **not** raw odds (no `--min-odds=15`) but strict
+> `>=10% +EV` under the existing alert metrics. `scripts/ws-lifetime-probe.mjs`
+> now evaluates each Stoiximan/Novibet WebSocket ML update against The Odds API
+> reference data before opening a lifetime: event match, Pinnacle fair EV, and
+> 3-book consensus EV must all pass the same strict confirmation rule used by
+> Telegram alerts. It writes `reports/ws-lifetime-log.csv` only when a confirmed
+> edge closes, with first/peak/last odds and Pinnacle/consensus EV fields. It is
+> still measurement-only: no Telegram, no auto-betting, no threshold change.
+> Verification: focused WS tests plus full `npm test` / `node --test` **213/213
+> passing**.
+>
 > **Status update 2026-06-27 (Codex executed post-paid roadmap core).** Workstream A
 > is implemented: paper `scan` and strict `mispricing-scan` now keep a **1000-credit
 > CLV reserve** (`MIN_SCAN_QUOTA`, `QUOTA_RESERVE`), and `Bet-Paper-Scan` installer
@@ -49,9 +62,9 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 > **19900**. Workstream C is implemented as `scripts/ws-lifetime-probe.mjs` using
 > Node 22 built-in `WebSocket`, `seq`/`lastSeq`, redacted URLs, and
 > `reports/ws-lifetime-log.csv`; 3-second smoke connected and welcome showed
-> Stoiximan/Novibet. The WS odds payload does **not** carry EV, so v1 logs
-> high-price lifetime windows and leaves `providerExpectedValue` blank until a later
-> reference cross-check. Workstream D scope is documented in
+> Stoiximan/Novibet. Owner clarification replaced the initial raw high-price probe:
+> the script now cross-checks WS updates against The Odds API and logs only strict
+> confirmed `>=10% +EV` lifetimes. Workstream D scope is documented in
 > `docs/superpowers/plans/2026-06-27-p8-live-betting-scope.md`. Live paper scan after
 > A: 18 leagues, 35 matched fixtures, 7 value bets, 1 new paper bet, quota 19864;
 > `clv` spent zero because no bet was inside the capture window; `value-flow-report`
@@ -423,10 +436,12 @@ First concrete step is the **measure-only WebSocket instrument** (Workstream C o
 
 Implemented 2026-06-27: `scripts/ws-lifetime-probe.mjs` logs local lifetime rows
 from the Odds-API.io WebSocket odds channel with key redaction and `lastSeq`
-replay. A short smoke connected successfully. It is still measure-only and not
-wired to Telegram. The feed does not include EV, so v1 logs high-price windows;
-the buy/don't-buy decision still needs a longer run and, ideally, later reference
-cross-checking.
+replay. After owner clarification, the probe no longer tracks raw high-price
+windows; it opens lifetimes only for strict confirmed `>=10% +EV` candidates
+using the same Pinnacle + 3-book consensus rule as Telegram alerts, then closes
+them when confirmation fails, the selection disappears, or the market is deleted.
+It is still measure-only and not wired to Telegram. The buy/don't-buy decision
+still needs a longer run with at least one full confirmed-edge lifecycle.
 
 ### P9 - Historical de-vig calibration: OPEN (new 2026-06-27)
 

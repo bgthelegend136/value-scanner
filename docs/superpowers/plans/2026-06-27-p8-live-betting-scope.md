@@ -26,17 +26,19 @@ data means no alert.
 ## Current Probe
 
 `provider-harness/scripts/ws-lifetime-probe.mjs` is the first concrete step. It
-tracks how long configured high-price windows stay alive for Stoiximan/Novibet
-using Node 22's built-in `WebSocket`, `seq`/`lastSeq` replay, and local CSV logs.
+tracks how long strict confirmed Stoiximan/Novibet +EV windows stay alive using
+Node 22's built-in `WebSocket`, `seq`/`lastSeq` replay, The Odds API reference
+cross-checking, and local CSV logs.
 
-The current WebSocket odds payload does not include expected value. Therefore
-`providerExpectedValue` is blank in `reports/ws-lifetime-log.csv`; this probe
-measures price-window lifetime first. A later reviewed change can add reference
-cross-checking if the lifetime data justifies it.
+The WebSocket odds payload itself does not include expected value, so the probe
+derives it by matching the WS event to The Odds API and applying the existing
+strict rule: Pinnacle fair EV plus 3-book consensus EV must both clear the 10%
+floor. Raw longshot movement, such as 17 -> 12, is not enough unless it passes
+that confirmation.
 
 ## Buy / Do Not Buy Rule
 
-- If a meaningful share of observed high-price or later-confirmed edges closes
+- If a meaningful share of observed strict confirmed >=10% edges closes
   in under roughly 2-5 minutes, WebSocket likely pays for itself.
 - If most opportunities persist for more than roughly 10 minutes, improve polling
   cadence and do not pay for the add-on.
