@@ -23,6 +23,7 @@ import {
   paperSportKey,
   settlePaperBets,
   summarizeClv,
+  summarizeClvCalibration,
   summarizeClvTrend,
   summarizePaperBets,
 } from "./paper.mjs";
@@ -904,6 +905,11 @@ const CLV_REPORT_COLUMNS = [
   "scope", "key", "captured", "positive", "beatRate", "averageClv",
 ];
 
+const CLV_CALIBRATION_COLUMNS = [
+  "scope", "key", "count", "positive", "positiveClvRate",
+  "averageEv", "averageClv", "medianClv", "clvMinusEv",
+];
+
 function clvReportRow(row) {
   return {
     scope: row.scope,
@@ -945,6 +951,67 @@ async function runClvReport({ out, reportsDir, now }) {
       `Beat rate: ${beatRate}`,
       `Average CLV: ${averageClv}`,
       `Wrote ${csvRows.length} summary rows to ${join(reportsDir, "clv-report.csv")}`,
+    ].join("\n") + "\n",
+  );
+  return 0;
+}
+
+function decimalOrBlank(value) {
+  return value === null || value === undefined ? "" : value.toFixed(4);
+}
+
+function clvCalibrationRow(row) {
+  return {
+    scope: row.scope,
+    key: row.key,
+    count: String(row.count),
+    positive: String(row.positive),
+    positiveClvRate: decimalOrBlank(row.positiveClvRate),
+    averageEv: decimalOrBlank(row.averageEv),
+    averageClv: decimalOrBlank(row.averageClv),
+    medianClv: decimalOrBlank(row.medianClv),
+    clvMinusEv: decimalOrBlank(row.clvMinusEv),
+  };
+}
+
+async function runClvCalibrate({ out, reportsDir, now }) {
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  if (!await defaultFileExists(ledgerPath)) {
+    out("No paper-bet ledger found. Run scan first.\n");
+    return 0;
+  }
+
+  const rows = await readCsv(ledgerPath);
+  const report = summarizeClvCalibration(rows);
+  const csvRows = report.rows.map(clvCalibrationRow);
+  const generatedAt = now().toISOString();
+  const json = {
+    generatedAt,
+    sampleSize: report.sampleSize,
+    regression: report.regression,
+    rows: csvRows,
+  };
+
+  await writeCsv(join(reportsDir, "clv-calibration.csv"), csvRows, CLV_CALIBRATION_COLUMNS);
+  await writeFile(
+    join(reportsDir, "clv-calibration.json"),
+    `${JSON.stringify(json, null, 2)}\n`,
+    "utf8",
+  );
+
+  const overall = report.rows.find((row) => row.scope === "overall" && row.key === "all");
+  const averageClv = overall?.averageClv === null || overall?.averageClv === undefined
+    ? "N/A"
+    : `${signed(overall.averageClv * 100, 2)}%`;
+  const slope = report.regression.slope === null ? "N/A" : signed(report.regression.slope, 4);
+  const rSquared = report.regression.rSquared === null ? "N/A" : report.regression.rSquared.toFixed(4);
+  out(
+    [
+      `CLV calibration: ${report.sampleSize} captured rows`,
+      `Average CLV: ${averageClv}`,
+      `Regression slope: ${slope}`,
+      `Regression R^2: ${rSquared}`,
+      `Wrote ${csvRows.length} diagnostics rows to ${join(reportsDir, "clv-calibration.csv")}`,
     ].join("\n") + "\n",
   );
   return 0;
@@ -1612,6 +1679,9 @@ export async function runCli(argv, deps = {}) {
     if (command === "clv-report") {
       return await runClvReport({ out, reportsDir, now });
     }
+    if (command === "clv-calibrate") {
+      return await runClvCalibrate({ out, reportsDir, now });
+    }
     if (command === "value-flow-report") {
       return await runValueFlowReport({ out, reportsDir, now });
     }
@@ -1700,7 +1770,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

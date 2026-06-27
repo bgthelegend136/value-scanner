@@ -287,3 +287,86 @@ test("clv-report writes trend summaries without spending API quota", async () =>
   assert.equal(json.generatedAt, "2026-06-27T08:00:00.000Z");
   assert.equal(json.rows.length, 5);
 });
+
+test("clv-calibrate writes EV bucket and segment diagnostics without spending API quota", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-calibrate-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({
+      referenceEventId: "control-neg",
+      tier: "CONTROL",
+      bookmaker: "betfair_ex_eu",
+      sportKey: "basketball_wnba",
+      decimalOdds: "2.0000",
+      ev: "-0.030000",
+      clv: "-0.040000",
+      clvCapturedAt: "2026-06-27T12:00:00.000Z",
+    }),
+    paperRow({
+      referenceEventId: "control-flat",
+      tier: "CONTROL",
+      bookmaker: "matchbook",
+      sportKey: "baseball_mlb",
+      decimalOdds: "1.8000",
+      ev: "0.010000",
+      clv: "-0.005000",
+      clvCapturedAt: "2026-06-27T13:00:00.000Z",
+    }),
+    paperRow({
+      referenceEventId: "value-mid",
+      tier: "VALUE",
+      bookmaker: "Stoiximan",
+      sportKey: "soccer_fifa_world_cup",
+      decimalOdds: "2.5000",
+      ev: "0.040000",
+      clv: "0.030000",
+      clvCapturedAt: "2026-06-27T14:00:00.000Z",
+    }),
+    paperRow({
+      referenceEventId: "value-high",
+      tier: "VALUE",
+      bookmaker: "Novibet",
+      sportKey: "soccer_fifa_world_cup",
+      decimalOdds: "6.0000",
+      ev: "0.120000",
+      clv: "0.080000",
+      clvCapturedAt: "2026-06-27T15:00:00.000Z",
+    }),
+    paperRow({
+      referenceEventId: "uncaptured",
+      tier: "VALUE",
+      ev: "0.200000",
+      clv: "",
+      clvCapturedAt: "",
+    }),
+  ], PAPER_COLUMNS);
+
+  let out = "";
+  const code = await runCli(["clv-calibrate"], {
+    out: (text) => { out += text; },
+    err: () => {},
+    reportsDir,
+    now: () => new Date("2026-06-28T09:00:00.000Z"),
+    loadTheOddsKey: async () => { throw new Error("must not load key"); },
+    createTheOddsClient: () => { throw new Error("must not create client"); },
+  });
+
+  assert.equal(code, 0);
+  assert.match(out, /CLV calibration: 4 captured rows/);
+  assert.match(out, /Regression slope: \+/);
+
+  const csv = await readCsv(join(reportsDir, "clv-calibration.csv"));
+  const byKey = new Map(csv.map((row) => [`${row.scope}:${row.key}`, row]));
+  assert.equal(byKey.get("overall:all").count, "4");
+  assert.equal(byKey.get("tier:VALUE").count, "2");
+  assert.equal(byKey.get("tier:CONTROL").averageClv, "-0.0225");
+  assert.equal(byKey.get("evBucket:-5..0%").count, "1");
+  assert.equal(byKey.get("evBucket:10%+").averageClv, "0.0800");
+  assert.equal(byKey.get("oddsBucket:5.00+").count, "1");
+
+  const json = JSON.parse(await readFile(join(reportsDir, "clv-calibration.json"), "utf8"));
+  assert.equal(json.generatedAt, "2026-06-28T09:00:00.000Z");
+  assert.equal(json.sampleSize, 4);
+  assert.ok(json.regression.slope > 0);
+  assert.ok(json.regression.rSquared > 0.8);
+  assert.ok(json.rows.length >= 10);
+});

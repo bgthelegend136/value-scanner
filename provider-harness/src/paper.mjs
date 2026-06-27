@@ -299,3 +299,173 @@ export function summarizeClvTrend(rows) {
       order.get(left.scope) - order.get(right.scope) || left.key.localeCompare(right.key),
     );
 }
+
+function optionalFinite(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function clvCalibrationSample(rows) {
+  const samples = [];
+  for (const row of rows) {
+    const ev = optionalFinite(row.ev);
+    const clv = optionalFinite(row.clv);
+    if (ev === null || clv === null) continue;
+    samples.push({
+      row,
+      ev,
+      clv,
+      odds: optionalFinite(row.decimalOdds),
+    });
+  }
+  return samples;
+}
+
+export function evCalibrationBucket(ev) {
+  if (ev < -0.05) return "<-5%";
+  if (ev < 0) return "-5..0%";
+  if (ev < 0.02) return "0..2%";
+  if (ev < 0.05) return "2..5%";
+  if (ev < 0.10) return "5..10%";
+  return "10%+";
+}
+
+export function oddsCalibrationBucket(odds) {
+  if (!(odds > 0)) return "(unknown)";
+  if (odds < 1.50) return "<1.50";
+  if (odds < 2.00) return "1.50..2.00";
+  if (odds < 3.00) return "2.00..3.00";
+  if (odds < 5.00) return "3.00..5.00";
+  return "5.00+";
+}
+
+function median(values) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle];
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function emptyCalibrationBucket(scope, key) {
+  return {
+    scope,
+    key,
+    count: 0,
+    positive: 0,
+    evTotal: 0,
+    clvTotal: 0,
+    clvValues: [],
+  };
+}
+
+function addCalibrationBucket(buckets, scope, key, sample) {
+  const safeKey = String(key ?? "").trim() || "(blank)";
+  const id = `${scope}|${safeKey}`;
+  if (!buckets.has(id)) buckets.set(id, emptyCalibrationBucket(scope, safeKey));
+  const bucket = buckets.get(id);
+  bucket.count += 1;
+  bucket.evTotal += sample.ev;
+  bucket.clvTotal += sample.clv;
+  bucket.clvValues.push(sample.clv);
+  if (sample.clv > 0) bucket.positive += 1;
+}
+
+function finishCalibrationBucket(bucket) {
+  const averageEv = bucket.count > 0 ? bucket.evTotal / bucket.count : null;
+  const averageClv = bucket.count > 0 ? bucket.clvTotal / bucket.count : null;
+  return {
+    scope: bucket.scope,
+    key: bucket.key,
+    count: bucket.count,
+    positive: bucket.positive,
+    positiveClvRate: bucket.count > 0 ? bucket.positive / bucket.count : null,
+    averageEv,
+    averageClv,
+    medianClv: median(bucket.clvValues),
+    clvMinusEv: averageClv === null || averageEv === null ? null : averageClv - averageEv,
+  };
+}
+
+export function clvEvRegression(rows) {
+  const samples = clvCalibrationSample(rows);
+  const n = samples.length;
+  if (n < 2) return { count: n, slope: null, intercept: null, rSquared: null };
+
+  const xMean = samples.reduce((sum, sample) => sum + sample.ev, 0) / n;
+  const yMean = samples.reduce((sum, sample) => sum + sample.clv, 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  for (const sample of samples) {
+    const dx = sample.ev - xMean;
+    const dy = sample.clv - yMean;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+  }
+  if (sxx === 0) return { count: n, slope: null, intercept: null, rSquared: null };
+  const slope = sxy / sxx;
+  const intercept = yMean - slope * xMean;
+  const rSquared = syy === 0 ? null : (sxy * sxy) / (sxx * syy);
+  return { count: n, slope, intercept, rSquared };
+}
+
+export function summarizeClvCalibration(rows) {
+  const samples = clvCalibrationSample(rows);
+  const buckets = new Map();
+
+  for (const sample of samples) {
+    const { row } = sample;
+    addCalibrationBucket(buckets, "overall", "all", sample);
+    addCalibrationBucket(buckets, "evBucket", evCalibrationBucket(sample.ev), sample);
+    addCalibrationBucket(buckets, "tier", row.tier, sample);
+    addCalibrationBucket(buckets, "sportKey", paperSportKey(row), sample);
+    addCalibrationBucket(buckets, "market", row.market, sample);
+    addCalibrationBucket(buckets, "bookmaker", row.bookmaker, sample);
+    addCalibrationBucket(buckets, "oddsBucket", oddsCalibrationBucket(sample.odds), sample);
+  }
+
+  const scopeOrder = new Map([
+    ["overall", 0],
+    ["evBucket", 1],
+    ["tier", 2],
+    ["sportKey", 3],
+    ["market", 4],
+    ["bookmaker", 5],
+    ["oddsBucket", 6],
+  ]);
+  const evBucketOrder = new Map([
+    ["<-5%", 0],
+    ["-5..0%", 1],
+    ["0..2%", 2],
+    ["2..5%", 3],
+    ["5..10%", 4],
+    ["10%+", 5],
+  ]);
+  const oddsBucketOrder = new Map([
+    ["<1.50", 0],
+    ["1.50..2.00", 1],
+    ["2.00..3.00", 2],
+    ["3.00..5.00", 3],
+    ["5.00+", 4],
+    ["(unknown)", 5],
+  ]);
+
+  const rowsOut = [...buckets.values()]
+    .map(finishCalibrationBucket)
+    .sort((left, right) => {
+      const scopeDelta = scopeOrder.get(left.scope) - scopeOrder.get(right.scope);
+      if (scopeDelta !== 0) return scopeDelta;
+      if (left.scope === "evBucket") return evBucketOrder.get(left.key) - evBucketOrder.get(right.key);
+      if (left.scope === "oddsBucket") return oddsBucketOrder.get(left.key) - oddsBucketOrder.get(right.key);
+      return right.count - left.count || left.key.localeCompare(right.key);
+    });
+
+  return {
+    sampleSize: samples.length,
+    regression: clvEvRegression(rows),
+    rows: rowsOut,
+  };
+}

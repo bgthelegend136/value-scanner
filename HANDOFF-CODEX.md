@@ -34,6 +34,19 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-28 (forward CLV calibration).**
+> Added `node src/cli.mjs clv-calibrate`, an offline calibration report over
+> `reports/paper-bets.csv`. It excludes rows without valid captured CLV, writes
+> `reports/clv-calibration.csv` and `.json`, and reports EV buckets, VALUE vs
+> CONTROL, sport/market/bookmaker/odds-bucket segments, plus `clv ~ computed_ev`
+> regression. It does not load API keys or spend credits. First live run:
+> **393** captured rows, average CLV **-1.02%**, regression slope **+0.9051**,
+> R^2 **0.2537**. Key split: VALUE **83** rows, avg CLV **+2.18%**, beat rate
+> **80.7%**; CONTROL **307** rows, avg CLV **-1.91%**, beat rate **21.8%**.
+> EV buckets are monotonic through 2-5% (`0..2%` avg CLV +0.79%, `2..5%`
+> +3.71%); `5..10%` has only 3 rows and is not reliable. TOTALS remain weak:
+> 43 rows, avg CLV -3.34%. Verification: `npm test` **242/242 passing**.
+>
 > **Status update 2026-06-27 (The Odds API sweep for fast research volume).**
 > Corrected the coverage strategy after re-reading the documented limitations:
 > Odds-API.io remains limited to the selected Stoiximan/Novibet account scope,
