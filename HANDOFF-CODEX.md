@@ -34,6 +34,22 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-28 (soccer-only market expansion).**
+> Added a research-only soccer market profile for `theodds-sweep`:
+> `--market-profile=soccer-core`. It uses The Odds API Event Odds endpoint for
+> `h2h,h2h_3_way,draw_no_bet,btts,double_chance`, filters to `soccer_*` sports,
+> and supports `--event-limit` plus `--max-event-credits` to cap credit spend.
+> No US-style markets (`spreads`, team totals, alternates, props) were added.
+> Normalization now maps `draw_no_bet` to `DRAW_NO_BET` and `h2h_3_way` to the
+> existing `MATCH_RESULT` bucket. Paper CLV capture now calls event odds for
+> pending soccer `DRAW_NO_BET`/`BTTS`/`DOUBLE_CHANCE` rows, so these markets can
+> become real VALUE CLV samples instead of dead paper rows. First capped live
+> run: `--market-profile=soccer-core --edge=0 --sample-min-ev=-5
+> --sample-limit=150 --max-sports=8 --event-limit=4 --max-event-credits=150`
+> used **133** credits, wrote **14** VALUE and **150** CONTROL rows, but the
+> usable audit rows were all `MATCH_RESULT`; current extra-market coverage did
+> not pass the consensus/value filters. Verification: `npm test` **244/244**.
+>
 > **Status update 2026-06-28 (forward CLV calibration).**
 > Added `node src/cli.mjs clv-calibrate`, an offline calibration report over
 > `reports/paper-bets.csv`. It excludes rows without valid captured CLV, writes

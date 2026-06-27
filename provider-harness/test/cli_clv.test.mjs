@@ -197,6 +197,69 @@ test("clv captures totals paper bets by requesting totals closing markets", asyn
   assert.notEqual(row.closingFairOdds, "");
 });
 
+test("clv captures soccer event-level markets with event odds", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-soccer-event-market-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [paperRow({
+    market: "DRAW_NO_BET",
+    outcome: "1",
+    decimalOdds: "2.0500",
+    fairOdds: "1.7200",
+    fairProbability: "0.581395",
+    ev: "0.191860",
+    sportKey: "soccer_fifa_world_cup",
+  })], PAPER_COLUMNS);
+  const eventClosing = {
+    id: "ref1",
+    sport_title: "FIFA World Cup",
+    commence_time: "2026-06-25T18:00:00Z",
+    home_team: "Spain",
+    away_team: "Cape Verde",
+    bookmakers: [{
+      key: "pinnacle",
+      title: "Pinnacle",
+      markets: [{
+        key: "draw_no_bet",
+        last_update: "2026-06-25T17:55:00Z",
+        outcomes: [
+          { name: "Spain", price: 1.70 },
+          { name: "Cape Verde", price: 2.15 },
+        ],
+      }],
+    }],
+  };
+  const calls = [];
+  const code = await runCli(["clv"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getOdds(args) {
+        calls.push(["odds", args]);
+        return { data: [], receivedAt: "2026-06-25T17:55:00.000Z", quota: { remaining: 494, lastCost: 2 } };
+      },
+      async getEventOdds(args) {
+        calls.push(["eventOdds", args]);
+        return { data: eventClosing, receivedAt: "2026-06-25T17:55:00.000Z", quota: { remaining: 490, lastCost: 4 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-25T17:55:00.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls, [
+    ["odds", { sportKey: "soccer_fifa_world_cup", markets: "h2h,totals" }],
+    ["eventOdds", {
+      sportKey: "soccer_fifa_world_cup",
+      eventId: "ref1",
+      markets: "h2h,h2h_3_way,draw_no_bet,btts,double_chance",
+    }],
+  ]);
+  const [row] = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.notEqual(row.clv, "");
+  assert.notEqual(row.closingFairOdds, "");
+});
+
 test("clv queries each pending league's closing line and merges them", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "clv-multi-"));
   const brClosing = [{

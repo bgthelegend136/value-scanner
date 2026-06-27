@@ -53,6 +53,23 @@ test("maps event-level additional soccer markets into canonical selections", () 
       last_update: "2026-06-26T01:32:00Z",
       markets: [
         {
+          key: "draw_no_bet",
+          last_update: "2026-06-26T01:32:00Z",
+          outcomes: [
+            { name: "Turkey", price: 1.95 },
+            { name: "USA", price: 1.90 },
+          ],
+        },
+        {
+          key: "h2h_3_way",
+          last_update: "2026-06-26T01:32:00Z",
+          outcomes: [
+            { name: "Turkey", price: 2.7 },
+            { name: "Draw", price: 3.1 },
+            { name: "USA", price: 2.9 },
+          ],
+        },
+        {
           key: "double_chance",
           last_update: "2026-06-26T01:32:00Z",
           outcomes: [
@@ -106,6 +123,8 @@ test("maps event-level additional soccer markets into canonical selections", () 
     }],
   }], receivedAt);
 
+  assert.equal(rows.find((r) => r.market === "DRAW_NO_BET" && r.outcome === "1").decimalOdds, 1.95);
+  assert.equal(rows.find((r) => r.market === "MATCH_RESULT" && r.outcome === "X").decimalOdds, 3.1);
   assert.equal(rows.find((r) => r.market === "DOUBLE_CHANCE" && r.outcome === "X2").decimalOdds, 1.3);
   assert.equal(rows.find((r) => r.market === "BTTS" && r.outcome === "YES").decimalOdds, 1.58);
   assert.equal(rows.find((r) => r.market === "TEAM_TOTALS" && r.line === "USA|1.5" && r.outcome === "OVER").decimalOdds, 1.85);

@@ -85,7 +85,7 @@ export function normalizeTheOddsResponse(payload, receivedAt) {
       for (const market of bookmaker.markets ?? []) {
         const quoteUpdatedAt = iso(market.last_update) || bookUpdated;
 
-        if (market.key === "h2h") {
+        if (market.key === "h2h" || market.key === "h2h_3_way") {
           for (const outcome of market.outcomes ?? []) {
             const decimalOdds = number(outcome.price);
             if (decimalOdds === null) continue;
@@ -95,6 +95,14 @@ export function normalizeTheOddsResponse(payload, receivedAt) {
             else if (String(outcome.name).toLowerCase() === "draw") mapped = "X";
             if (!mapped) continue;
             pushRow({ ...base, bookmaker: key, market: "MATCH_RESULT", line: "", outcome: mapped, decimalOdds, quoteUpdatedAt });
+          }
+        } else if (market.key === "draw_no_bet") {
+          for (const outcome of market.outcomes ?? []) {
+            const decimalOdds = number(outcome.price);
+            if (decimalOdds === null) continue;
+            const mapped = side(outcome.name, event);
+            if (!mapped) continue;
+            pushRow({ ...base, bookmaker: key, market: "DRAW_NO_BET", line: "", outcome: mapped, decimalOdds, quoteUpdatedAt });
           }
         } else if (market.key === "totals" || market.key === "alternate_totals") {
           for (const outcome of market.outcomes ?? []) {

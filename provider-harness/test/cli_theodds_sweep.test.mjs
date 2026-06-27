@@ -42,6 +42,68 @@ const event = {
   ],
 };
 
+const soccerEvent = {
+  id: "soccer-extra-1",
+  sport_key: "soccer_fifa_world_cup",
+  sport_title: "FIFA World Cup",
+  commence_time: "2026-06-28T18:00:00Z",
+  home_team: "Japan",
+  away_team: "Sweden",
+};
+
+function soccerExtraEvent() {
+  return {
+    ...soccerEvent,
+    bookmakers: [
+      {
+        key: "pinnacle",
+        title: "pinnacle",
+        markets: [
+          { key: "draw_no_bet", outcomes: [{ name: "Japan", price: 1.72 }, { name: "Sweden", price: 2.08 }] },
+          { key: "btts", outcomes: [{ name: "Yes", price: 1.80 }, { name: "No", price: 2.00 }] },
+          { key: "double_chance", outcomes: [{ name: "Japan or Draw", price: 1.32 }, { name: "Sweden or Draw", price: 1.45 }, { name: "Japan or Sweden", price: 1.24 }] },
+        ],
+      },
+      {
+        key: "betsson",
+        title: "betsson",
+        markets: [
+          { key: "draw_no_bet", outcomes: [{ name: "Japan", price: 1.70 }, { name: "Sweden", price: 2.10 }] },
+          { key: "btts", outcomes: [{ name: "Yes", price: 1.82 }, { name: "No", price: 1.98 }] },
+          { key: "double_chance", outcomes: [{ name: "Japan or Draw", price: 1.31 }, { name: "Sweden or Draw", price: 1.46 }, { name: "Japan or Sweden", price: 1.25 }] },
+        ],
+      },
+      {
+        key: "unibet",
+        title: "unibet",
+        markets: [
+          { key: "draw_no_bet", outcomes: [{ name: "Japan", price: 1.71 }, { name: "Sweden", price: 2.09 }] },
+          { key: "btts", outcomes: [{ name: "Yes", price: 1.81 }, { name: "No", price: 1.99 }] },
+          { key: "double_chance", outcomes: [{ name: "Japan or Draw", price: 1.32 }, { name: "Sweden or Draw", price: 1.45 }, { name: "Japan or Sweden", price: 1.24 }] },
+        ],
+      },
+      {
+        key: "williamhill",
+        title: "williamhill",
+        markets: [
+          { key: "draw_no_bet", outcomes: [{ name: "Japan", price: 1.69 }, { name: "Sweden", price: 2.11 }] },
+          { key: "btts", outcomes: [{ name: "Yes", price: 1.80 }, { name: "No", price: 2.00 }] },
+          { key: "double_chance", outcomes: [{ name: "Japan or Draw", price: 1.31 }, { name: "Sweden or Draw", price: 1.47 }, { name: "Japan or Sweden", price: 1.25 }] },
+        ],
+      },
+      {
+        key: "softbook",
+        title: "softbook",
+        markets: [
+          { key: "draw_no_bet", outcomes: [{ name: "Japan", price: 2.05 }, { name: "Sweden", price: 1.80 }] },
+          { key: "btts", outcomes: [{ name: "Yes", price: 2.25 }, { name: "No", price: 1.65 }] },
+          { key: "double_chance", outcomes: [{ name: "Japan or Draw", price: 1.60 }, { name: "Sweden or Draw", price: 1.25 }, { name: "Japan or Sweden", price: 1.15 }] },
+        ],
+      },
+    ],
+  };
+}
+
 test("theodds-sweep records cross-book paper value and controls without Odds-API.io", async () => {
   const calls = [];
   let out = "";
@@ -97,6 +159,63 @@ test("theodds-sweep records cross-book paper value and controls without Odds-API
   assert.equal(value.sportKey, "soccer_fifa_world_cup");
   assert.ok(Number(value.ev) >= 0.05);
   assert.equal(rows.filter((row) => row.tier === "CONTROL").length, 3);
+});
+
+test("theodds-sweep soccer-core uses event odds for soccer-only research markets", async () => {
+  const calls = [];
+  const reportsDir = await mkdtemp(join(tmpdir(), "theodds-sweep-soccer-core-"));
+
+  const code = await runCli([
+    "theodds-sweep",
+    "--market-profile=soccer-core",
+    "--edge=5",
+    "--sample-min-ev=-5",
+    "--sample-limit=2",
+    "--max-sports=10",
+    "--event-limit=1",
+  ], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async listSports() {
+        calls.push(["sports"]);
+        return {
+          data: [
+            { key: "soccer_fifa_world_cup", active: true },
+            { key: "basketball_wnba", active: true },
+          ],
+        };
+      },
+      async listEvents(args) {
+        calls.push(["events", args]);
+        return { data: [soccerEvent], quota: { remaining: 19888, lastCost: 0 } };
+      },
+      async getEventOdds(args) {
+        calls.push(["eventOdds", args]);
+        return { data: soccerExtraEvent(), receivedAt: "2026-06-27T12:00:05Z", quota: { remaining: 19884, lastCost: 4 } };
+      },
+      async getOdds() {
+        throw new Error("soccer-core must use event odds, not bulk odds");
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-27T12:00:05Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls.filter((call) => call[0] === "events").map((call) => call[1].sportKey), ["soccer_fifa_world_cup"]);
+  assert.deepEqual(calls.find((call) => call[0] === "eventOdds")[1], {
+    sportKey: "soccer_fifa_world_cup",
+    eventId: "soccer-extra-1",
+    regions: "eu",
+    markets: "h2h,h2h_3_way,draw_no_bet,btts,double_chance",
+  });
+
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.ok(rows.some((row) => row.market === "DRAW_NO_BET" && row.tier !== "CONTROL"));
+  assert.ok(rows.some((row) => row.market === "BTTS" && row.tier !== "CONTROL"));
+  assert.equal(rows.some((row) => row.market === "TOTALS"), false);
 });
 
 test("theodds-sweep falls back to h2h when a sport rejects totals", async () => {

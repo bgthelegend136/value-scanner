@@ -49,6 +49,7 @@ const execFileAsync = promisify(execFile);
 const TARGET_BOOKMAKERS = ["Novibet", "Stoiximan"];
 const REFERENCE_BOOKMAKER = "pinnacle";
 const PAPER_REFERENCE_MARKETS = "h2h,totals";
+const SOCCER_CORE_RESEARCH_MARKETS = "h2h,h2h_3_way,draw_no_bet,btts,double_chance";
 // Quota guard: stop a multi-league scan once The Odds API monthly credits drop
 // below this floor, so the autoscan can never drain the budget to zero. The
 // reserve leaves room for CLV capture (the irreplaceable spend).
@@ -566,6 +567,10 @@ function sweepOpportunity(result) {
   };
 }
 
+function normalizeTheOddsPayload(payload, receivedAt) {
+  return normalizeTheOddsResponse(Array.isArray(payload) ? payload : [payload], receivedAt);
+}
+
 function findTheOddsSweepRows(rows, {
   sportKey,
   threshold,
@@ -627,15 +632,20 @@ async function runTheOddsSweep({
   const sampleLimit = Math.max(0, Math.floor(numericArg(args, "sample-limit", 100)));
   const minBooks = Math.max(2, Math.floor(numericArg(args, "min-books", 4)));
   const maxSports = Math.max(1, Math.floor(numericArg(args, "max-sports", 12)));
-  const markets = optionValue(args, "markets", PAPER_REFERENCE_MARKETS);
+  const marketProfile = optionValue(args, "market-profile", "");
+  const soccerCore = marketProfile === "soccer-core";
+  const markets = optionValue(args, "markets", soccerCore ? SOCCER_CORE_RESEARCH_MARKETS : PAPER_REFERENCE_MARKETS);
   const regions = optionValue(args, "regions", "eu");
   const candidateBookmakers = splitArg(args, "bookmakers");
   const explicitSports = splitArg(args, "sports");
+  const eventLimit = Math.max(1, Math.floor(numericArg(args, "event-limit", 8)));
+  const maxEventCredits = Math.max(0, Math.floor(numericArg(args, "max-event-credits", 250)));
   const sportsResponse = await client.listSports();
   const activeSports = (sportsResponse.data ?? []).filter((sport) => sport.active !== false);
   const activeKeys = new Set(activeSports.map((sport) => String(sport.key)));
   const sportKeys = (explicitSports.length ? explicitSports : activeSports.map((sport) => String(sport.key)))
     .filter((sportKey) => activeKeys.has(sportKey))
+    .filter((sportKey) => !soccerCore || sportKey.startsWith("soccer_"))
     .slice(0, maxSports);
 
   const values = [];
@@ -645,6 +655,40 @@ async function runTheOddsSweep({
   let actualCredits = 0;
   let skippedSports = 0;
   for (const sportKey of sportKeys) {
+    if (soccerCore) {
+      const eventsResponse = await client.listEvents({ sportKey });
+      quotaRemaining = eventsResponse.quota?.remaining ?? quotaRemaining;
+      actualCredits += Number(eventsResponse.quota?.lastCost ?? 0) || 0;
+      const eventIds = (eventsResponse.data ?? []).map((event) => String(event.id)).filter(Boolean).slice(0, eventLimit);
+      for (const eventId of eventIds) {
+        if (maxEventCredits > 0 && actualCredits >= maxEventCredits) break;
+        let response;
+        try {
+          response = await client.getEventOdds({ sportKey, eventId, regions, markets });
+        } catch (error) {
+          if (!String(error.message).includes("status 422")) throw error;
+          skippedSports += 1;
+          break;
+        }
+        quotaRemaining = response.quota?.remaining ?? quotaRemaining;
+        actualCredits += Number(response.quota?.lastCost ?? 0) || 0;
+        const rows = normalizeTheOddsPayload(response.data ?? [], response.receivedAt);
+        const result = findTheOddsSweepRows(rows, {
+          sportKey,
+          threshold,
+          sampleMinEv,
+          minBooks,
+          candidateBookmakers,
+        });
+        values.push(...result.values);
+        controls.push(...result.controls);
+        audit.push(...result.audit);
+      }
+      if (Number.isFinite(quotaRemaining) && quotaRemaining < MIN_SCAN_QUOTA) break;
+      if (maxEventCredits > 0 && actualCredits >= maxEventCredits) break;
+      continue;
+    }
+
     let response;
     try {
       response = await client.getOdds({ sportKey, regions, markets });
@@ -660,7 +704,7 @@ async function runTheOddsSweep({
     }
     quotaRemaining = response.quota?.remaining ?? quotaRemaining;
     actualCredits += Number(response.quota?.lastCost ?? 0) || 0;
-    const rows = normalizeTheOddsResponse(response.data ?? [], response.receivedAt);
+    const rows = normalizeTheOddsPayload(response.data ?? [], response.receivedAt);
     const result = findTheOddsSweepRows(rows, {
       sportKey,
       threshold,
@@ -822,7 +866,7 @@ async function runFdSettle({ loadFootballDataKey, createFootballDataClient: crea
 }
 
 function closingFairByKey(payload, receivedAt) {
-  const pinnacle = normalizeTheOddsResponse(payload, receivedAt).filter(
+  const pinnacle = normalizeTheOddsPayload(payload, receivedAt).filter(
     (row) => row.bookmaker === REFERENCE_BOOKMAKER,
   );
   const byEvent = new Map();
@@ -837,6 +881,22 @@ function closingFairByKey(payload, receivedAt) {
     }
   }
   return fair;
+}
+
+const EVENT_LEVEL_CLV_MARKETS = new Set(["DRAW_NO_BET", "BTTS", "DOUBLE_CHANCE"]);
+
+function eventLevelClvTargets(rows) {
+  const targets = new Map();
+  for (const row of rows) {
+    if (!EVENT_LEVEL_CLV_MARKETS.has(row.market)) continue;
+    const sportKey = paperSportKey(row);
+    if (!sportKey.startsWith("soccer_")) continue;
+    const eventId = String(row.referenceEventId ?? "").trim();
+    if (!eventId) continue;
+    const key = `${sportKey}|${eventId}`;
+    if (!targets.has(key)) targets.set(key, { sportKey, eventId });
+  }
+  return [...targets.values()];
 }
 
 async function runClv({
@@ -878,6 +938,17 @@ async function runClv({
   let quotaRemaining;
   for (const sportKey of pendingSportKeys) {
     const response = await client.getOdds({ sportKey, markets: PAPER_REFERENCE_MARKETS });
+    quotaRemaining = response.quota?.remaining ?? quotaRemaining;
+    for (const [key, probability] of closingFairByKey(response.data ?? [], response.receivedAt)) {
+      closing.set(key, probability);
+    }
+  }
+  for (const target of eventLevelClvTargets(dueRows)) {
+    const response = await client.getEventOdds({
+      sportKey: target.sportKey,
+      eventId: target.eventId,
+      markets: SOCCER_CORE_RESEARCH_MARKETS,
+    });
     quotaRemaining = response.quota?.remaining ?? quotaRemaining;
     for (const [key, probability] of closingFairByKey(response.data ?? [], response.receivedAt)) {
       closing.set(key, probability);
