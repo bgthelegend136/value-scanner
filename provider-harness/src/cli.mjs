@@ -471,6 +471,13 @@ function parseBookmakers(value) {
   return [...new Set(parsed)];
 }
 
+function parseWindowMs(value, fallbackMs) {
+  const minutes = Number(value);
+  return Number.isFinite(minutes) && minutes > 0
+    ? minutes * 60 * 1000
+    : fallbackMs;
+}
+
 function printPaperSummary(out, rows) {
   const summary = summarizePaperBets(rows);
   const roi = summary.roi === null ? "N/A" : `${signed(summary.roi * 100, 1)}%`;
@@ -592,7 +599,14 @@ function closingFairByKey(payload, receivedAt) {
   return fair;
 }
 
-async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, now }) {
+async function runClv({
+  loadTheOddsKey,
+  createTheOddsClient,
+  out,
+  reportsDir,
+  now,
+  captureWindowMs = CLV_CAPTURE_WINDOW_MS,
+}) {
   const ledgerPath = join(reportsDir, "paper-bets.csv");
   if (!await defaultFileExists(ledgerPath)) {
     out("No paper-bet ledger found. Run scan first.\n");
@@ -608,7 +622,7 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
   const dueRows = rows.filter((row) =>
     row.status === "PENDING" &&
     !row.clvCapturedAt &&
-    new Date(row.kickoffUtc).getTime() <= nowMs + CLV_CAPTURE_WINDOW_MS);
+    new Date(row.kickoffUtc).getTime() <= nowMs + captureWindowMs);
   if (dueRows.length === 0) {
     out("No paper bets are inside the CLV capture window.\n");
     return 0;
@@ -1322,8 +1336,17 @@ export async function runCli(argv, deps = {}) {
       });
     }
     if (command === "clv") {
+      const windowArg = rest.find((a) => a.startsWith("--window-minutes="));
       return await runClv({
-        loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+        loadTheOddsKey,
+        createTheOddsClient,
+        out,
+        reportsDir,
+        now,
+        captureWindowMs: parseWindowMs(
+          windowArg?.slice("--window-minutes=".length),
+          CLV_CAPTURE_WINDOW_MS,
+        ),
       });
     }
     if (command === "clv-report") {
@@ -1405,7 +1428,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] | settle | fd-settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

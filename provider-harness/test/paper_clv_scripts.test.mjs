@@ -8,7 +8,7 @@ test("paper-clv runner invokes clv and writes a transcript log", async () => {
     "utf8",
   );
 
-  assert.match(source, /node src[\\/]cli\.mjs clv/);
+  assert.match(source, /node src[\\/]cli\.mjs clv --window-minutes=40/);
   assert.match(source, /reports[\\/]logs/);
   assert.match(source, /paper-clv-\$Stamp\.log/);
   assert.match(source, /Start-Transcript/);
@@ -16,7 +16,7 @@ test("paper-clv runner invokes clv and writes a transcript log", async () => {
   assert.doesNotMatch(source, /TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|ODDS_API_IO_KEY|mispricing-scan/);
 });
 
-test("paper-clv installer repeats every 15 minutes and needs only The Odds API key", async () => {
+test("paper-clv installer repeats every 10 minutes and needs only The Odds API key", async () => {
   const source = await readFile(
     new URL("../scripts/install-paper-clv-task.ps1", import.meta.url),
     "utf8",
@@ -25,10 +25,11 @@ test("paper-clv installer repeats every 15 minutes and needs only The Odds API k
   assert.match(source, /Bet-Paper-CLV/);
   assert.match(source, /run-paper-clv\.ps1/);
   assert.match(source, /-RepetitionInterval/);
-  assert.match(source, /New-TimeSpan -Minutes 15/);
+  assert.match(source, /New-TimeSpan -Minutes 10/);
   assert.match(source, /-Once\b/);
   assert.match(source, /MultipleInstances IgnoreNew/);
   assert.match(source, /-StartWhenAvailable\b(?!\s+\$)/);
+  assert.match(source, /-WakeToRun\b(?!\s+\$)/);
   assert.match(source, /Register-ScheduledTask/);
   assert.match(source, /THE_ODDS_API_KEY/);
   assert.match(source, /rev-parse --git-common-dir/);

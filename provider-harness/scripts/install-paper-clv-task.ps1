@@ -41,10 +41,10 @@ $Action = New-ScheduledTaskAction `
   -Execute $PowerShell `
   -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Runner`""
 
-# Repeat frequently because the CLI captures only rows whose kickoff is inside
-# the CLV window. No due rows means no The Odds API request.
+# Repeat every 10 minutes because the CLI captures only rows whose kickoff is
+# inside the paper CLV window. No due rows means no The Odds API request.
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
-  -RepetitionInterval (New-TimeSpan -Minutes 15) `
+  -RepetitionInterval (New-TimeSpan -Minutes 10) `
   -RepetitionDuration (New-TimeSpan -Days 3650)
 
 $Settings = New-ScheduledTaskSettingsSet `

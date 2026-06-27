@@ -119,6 +119,31 @@ test("clv waits until kickoff is near before spending quota", async () => {
   assert.equal(row.clvCapturedAt, "");
 });
 
+test("clv accepts a paper-only wider capture window", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-paper-window-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [paperRow()], PAPER_COLUMNS);
+  const calls = [];
+  const code = await runCli(["clv", "--window-minutes=40"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getOdds(args) {
+        calls.push(args);
+        return { data: closingOdds, receivedAt: "2026-06-25T17:25:00.000Z", quota: { remaining: 494 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-25T17:25:00.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls, [{ sportKey: "soccer_fifa_world_cup" }]);
+  const [row] = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.notEqual(row.clv, "");
+  assert.equal(row.clvCapturedAt, "2026-06-25T17:25:00.000Z");
+});
+
 test("clv queries each pending league's closing line and merges them", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "clv-multi-"));
   const brClosing = [{

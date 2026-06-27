@@ -34,6 +34,26 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (forward CLV volume plan applied).** To grow the
+> forward CLV sample after the La Liga calibration showed the fair-value engine
+> is sound, the paper-only collection path was made more aggressive without
+> touching Telegram/live-alert rules. `scripts/run-paper-scan.ps1` now runs
+> `node src/cli.mjs scan --edge=0.5` (paper ledger only; strict Telegram floor
+> remains 10%). Paper CLV capture now has a CLI-only override
+> `clv --window-minutes=N`; `scripts/run-paper-clv.ps1` uses
+> `--window-minutes=40` so paper rows miss fewer near-close captures, while
+> `mispricing-clv` still uses the original 20-minute live-alert window.
+> `install-paper-clv-task.ps1` now repeats every 10 minutes and keeps
+> `WakeToRun`. Runtime tasks were re-registered: `Bet-Paper-Scan` is 4h /
+> `P3650D` / `WakeToRun=True`, `Bet-Paper-CLV` is 10m / `P3650D` /
+> `WakeToRun=True`. Manual `scan --edge=0.5` ran live: 18 leagues, 36 matched
+> fixtures, 12 value bets, 3 new paper bets, 9 duplicates, quota 16068. `clv
+> --window-minutes=40` had no due rows, so zero spend. Latest no-quota
+> `value-flow-report`: paper=28, audit=4981, latestScanRows=164, top rejection
+> `CANDIDATE_EV_BELOW_MIN`=4746. No secrets, no Telegram, no auto-betting.
+> Verification: focused TDD red/green, then `npm test` / `node --test`
+> **216/216 passing**.
+>
 > **Status update 2026-06-27 (historical calibration — first real result).** Fixed a
 > name-matching bug in `scripts/historical-calibration.mjs` (it calibrated 0 events
 > before: required exact normalized names, but football-data.org spells clubs differently
