@@ -34,6 +34,30 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (Codex executed post-paid roadmap core).** Workstream A
+> is implemented: paper `scan` and strict `mispricing-scan` now keep a **1000-credit
+> CLV reserve** (`MIN_SCAN_QUOTA`, `QUOTA_RESERVE`), and `Bet-Paper-Scan` installer
+> now repeats every **4h** with no 3-day stop. No Telegram floor change. Current P4
+> audit still has unmapped lower leagues/ITF/NBL1 groups, but a zero-credit active
+> `/sports` check found **no safe The Odds API key matches**, so no forced mapping
+> was added. Workstream B is implemented: `getHistoricalOdds` plus
+> `scripts/historical-calibration.mjs` (read-only JSON/CSV report, multiplicative /
+> Shin / power / consensus, Brier/log-loss/reliability, temporal OOS split). Outcome
+> preflight rejected EPL/PL Aug-Dec 2025, but confirmed La Liga `PD` Aug-Dec 2025
+> coverage (171 finished matches); 1-match tiny historical dry-run wrote
+> `reports/historical-calibration-2026-06-27T05-36-38.243Z.*`, quota remaining
+> **19900**. Workstream C is implemented as `scripts/ws-lifetime-probe.mjs` using
+> Node 22 built-in `WebSocket`, `seq`/`lastSeq`, redacted URLs, and
+> `reports/ws-lifetime-log.csv`; 3-second smoke connected and welcome showed
+> Stoiximan/Novibet. The WS odds payload does **not** carry EV, so v1 logs
+> high-price lifetime windows and leaves `providerExpectedValue` blank until a later
+> reference cross-check. Workstream D scope is documented in
+> `docs/superpowers/plans/2026-06-27-p8-live-betting-scope.md`. Live paper scan after
+> A: 18 leagues, 35 matched fixtures, 7 value bets, 1 new paper bet, quota 19864;
+> `clv` spent zero because no bet was inside the capture window; `value-flow-report`
+> paper=25, audit=4297, latestScanRows=157, top rejection `CANDIDATE_EV_BELOW_MIN`
+> =4078. Verification: `npm test` / `node --test` **210/210 passing**.
+>
 > **Status update 2026-06-27 (paid plan + WebSocket trial — roadmap).** The owner
 > bought **The Odds API 20K plan (€30/mo)** → historical odds + 40× the old free
 > credits (20,000 vs 500). Odds-API.io also granted a **2-day free WebSocket add-on**.
@@ -397,9 +421,23 @@ Likely where the biggest mistakes are, but needs a live odds source and faster l
 
 First concrete step is the **measure-only WebSocket instrument** (Workstream C of `docs/superpowers/plans/2026-06-27-post-paid-plan-roadmap.md`): use the Odds-API.io WebSocket trial to measure fleeting-edge lifetimes (the Iraq 17→12 case) before committing to any live pipeline. Building blocks for later: Odds-API.io `scores`/`status` channels, `/events/live`, `/odds/movements`. Under §0 #2 this stays *faster alerts to the human*, never auto-betting.
 
+Implemented 2026-06-27: `scripts/ws-lifetime-probe.mjs` logs local lifetime rows
+from the Odds-API.io WebSocket odds channel with key redaction and `lastSeq`
+replay. A short smoke connected successfully. It is still measure-only and not
+wired to Telegram. The feed does not include EV, so v1 logs high-price windows;
+the buy/don't-buy decision still needs a longer run and, ideally, later reference
+cross-checking.
+
 ### P9 - Historical de-vig calibration: OPEN (new 2026-06-27)
 
 The €30 plan unlocks historical odds. Lean first pass (1 league, ½ season ≈ 3,800 cr): de-vig closing snapshots, join to free football-data.org outcomes, score reliability/Brier/log-loss on an OOS split to judge fair-value calibration — the evidence needed before any calibrated change to the 10% floor. See Workstream B of the roadmap. Pre-flight the outcome-source coverage before the full credit spend.
+
+Implemented 2026-06-27: `src/theodds_client.mjs` has `getHistoricalOdds`, and
+`scripts/historical-calibration.mjs` performs the preflight + read-only report.
+football-data.org free returned 0 rows for EPL/PL Aug-Dec 2025, but La Liga `PD`
+covered 171 finished matches in Aug-Dec 2025. A 1-match tiny historical pull
+completed and wrote JSON/CSV reports. Full half-season pull is still a deliberate
+next command (`--full`) after reviewing the tiny report.
 
 ---
 

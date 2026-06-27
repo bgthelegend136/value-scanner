@@ -43,19 +43,21 @@ event-level), docs.odds-api.io (`llms.txt`) for the WebSocket contract.
 The old quota guards defended the 500/mo free plan; relax to the new budget so forward
 paper collection accelerates toward the ~200 settled CLV bets the calibration needs.
 
-- [ ] Relax quota guards, keeping a non-zero reserve (never fully drain). Reserve
+- [x] Relax quota guards, keeping a non-zero reserve (never fully drain). Reserve
       ~1,000 cr for CLV (the irreplaceable spend), allow scans the rest:
   - `src/cli.mjs` — `MIN_SCAN_QUOTA` (currently 60).
   - `src/mispricing_scan.mjs` — `QUOTA_RESERVE` (currently 100).
   - Add/adjust the guard test so it still trips at the new floor.
-- [ ] Re-install `Bet-Paper-Scan` without the 3-day auto-stop
+- [x] Re-install `Bet-Paper-Scan` without the 3-day auto-stop
       (`scripts/install-paper-scan-task.ps1` — drop/extend `RepetitionDuration P3D` /
       `StopAtDurationEnd`); optionally raise cadence 8h → 4h.
-- [ ] Widen paper league coverage (fail-closed, no rule change): data-driven from
+- [x] Widen paper league coverage (fail-closed, no rule change): data-driven from
       `UNMAPPED_SPORT_LEAGUE` in `reports/mispricing-audit.csv`, cross-checked vs the
       live `/sports` active list; add pairs to `config/multisport-map.json` (+ aliases
       in `multisport_map.mjs`). Confirm TOTALS is priced in `scan`.
-- [ ] Verify: live `scan` + `clv` show more matched fixtures/paper rows; guard trips at
+      2026-06-27 Codex check: current unmapped groups had no active `/sports` matches,
+      so no forced mapping was added.
+- [x] Verify: live `scan` + `clv` show more matched fixtures/paper rows; guard trips at
       the new floor; `node --test` green.
 
 ## Workstream B — Historical de-vig calibration (lean: 1 league, ½ season)
@@ -64,17 +66,17 @@ Answer "is my de-vigged fair probability well-calibrated?" in volume — the fai
 half of the 10%-floor decision. Soft books are **absent** from historical, so this is
 explicitly **not** a strategy backtest. State this plainly in the report.
 
-- [ ] **Pre-flight (do FIRST, cheap):** confirm the **outcome source covers the window**
+- [x] **Pre-flight (do FIRST, cheap):** confirm the **outcome source covers the window**
       before spending ~3,800 cr. `football_data_settle.mjs` / `football_data_client.mjs`
       (free) must return finished results for the chosen league+season (e.g. EPL `PL`,
       Aug–Dec 2025). If free coverage is short, pick a league/season it does cover. The
       Odds API `/scores` only goes back 3 days → NOT the results source.
-- [ ] Add `getHistoricalOdds({ sportKey, date, regions="eu", markets="h2h,totals",
+- [x] Add `getHistoricalOdds({ sportKey, date, regions="eu", markets="h2h,totals",
       oddsFormat="decimal" })` to `src/theodds_client.mjs` →
       `GET /historical/sports/{sportKey}/odds?date=ISO`. Historical wraps events as
       `{ timestamp, previous_timestamp, next_timestamp, data: [...] }` — return json; the
       caller unwraps `.data` before `normalizeTheOddsResponse`. Add a unit test (fixture).
-- [ ] Build `scripts/historical-calibration.mjs` (read-only; writes only a report):
+- [x] Build `scripts/historical-calibration.mjs` (read-only; writes only a report):
   - 1 league + ½-season range; **closing snapshot** (nearest kickoff) per match is enough
     (~190 × 1 × 20 cr ≈ 3,800 cr; one 24h snapshot optional for movement).
   - De-vig → fair probabilities, **reusing** `src/value.mjs` (`findValueBets`) and
@@ -83,7 +85,7 @@ explicitly **not** a strategy backtest. State this plainly in the report.
   - Metrics: reliability diagram (binned predicted vs realized), Brier, log-loss vs a
     naive baseline, on an **out-of-sample temporal split** (first half calibrate, second
     validate). Output `reports/historical-calibration-*.json/csv`.
-- [ ] Verify: tiny-window dry-run (a few credits) BEFORE the full pull; metrics computed;
+- [x] Verify: tiny-window dry-run (a few credits) BEFORE the full pull; metrics computed;
       report written; `node --test` green.
 
 ## Workstream C — WebSocket measure-only instrument (time-boxed to the 2-day trial)
@@ -91,14 +93,16 @@ explicitly **not** a strategy backtest. State this plainly in the report.
 Decide *from data* whether fleeting edges justify paying for the add-on. **No** alert /
 Telegram / betting wiring (respects P8 "scope before building"). Stop when the trial ends.
 
-- [ ] Build `scripts/ws-lifetime-probe.mjs` using Node 22 built-in `WebSocket` (no dep).
+- [x] Build `scripts/ws-lifetime-probe.mjs` using Node 22 built-in `WebSocket` (no dep).
       Get the WS endpoint/auth + subscribe shape from `docs.odds-api.io` (`llms.txt`);
       confirm the existing `ODDS_API_IO_KEY` works under the trial. Handle message types
       `welcome/created/updated/deleted/no_markets/score/status/resync_required`; use
       `seq`/`lastSeq` for reconnect replay. **Never print the key.**
-- [ ] Subscribe to the **odds** channel for Stoiximan/Novibet on target sports. Log each
+- [x] Subscribe to the **odds** channel for Stoiximan/Novibet on target sports. Log each
       value-bet candidate's **lifetime**: appear (created/updated over EV X) → disappear
       (deleted / updated below EV) with EV, odds, timestamps → `reports/ws-lifetime-log.csv`.
+      2026-06-27 Codex note: the WS odds payload does not carry EV, so v1 logs
+      high-price lifetime windows and leaves `providerExpectedValue` blank.
 - [ ] **Decision (record in WORKLOG):** if a meaningful share of real ≥5–10% edges live
       **< ~2–5 min**, WebSocket pays for itself → propose buying it as a separate reviewed
       change. If they live **> ~10 min**, tighten polling cadence (Workstream A) instead —
@@ -106,10 +110,13 @@ Telegram / betting wiring (respects P8 "scope before building"). Stop when the t
       or a stale display (cross-check `/odds/movements`).
 - [ ] Verify: connects, logs ≥1 full appear→disappear lifecycle, reconnects via `lastSeq`,
       leaks no secret.
+      2026-06-27 Codex smoke: connected successfully for 3 seconds with key redacted
+      and welcome showed Stoiximan/Novibet; full lifecycle still needs a longer run.
 
 ## Workstream D — Live betting (P8): scope-only groundwork
 
 No build now — document the path for the next milestone:
+`docs/superpowers/plans/2026-06-27-p8-live-betting-scope.md`.
 
 - Building blocks: Odds-API.io WebSocket **scores**/**status** channels, `/events/live`
   (clock/minute/period), `/odds/movements` + paid `/dropping-odds`.

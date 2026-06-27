@@ -67,7 +67,7 @@ function secondaryReferenceOdds() {
     ],
   }];
 }
-function deps({ reportsDir, state, sent = [], quotaRemaining = 498 }) {
+function deps({ reportsDir, state, sent = [], quotaRemaining = 19998 }) {
   return {
     valueBetsClient: {
       async getValueBets({ bookmaker }) {
@@ -277,7 +277,7 @@ test("falls back to a secondary reference source when primary odds lack Pinnacle
       ],
     }],
     receivedAt: now.toISOString(),
-    quota: { remaining: 498, lastCost: 1 },
+    quota: { remaining: 19998, lastCost: 1 },
   });
 
   const summary = await runMispricingScan({
@@ -318,10 +318,10 @@ test("Telegram failure records no delivery and leaves a retryable queue", async 
   assert.equal((await state.readHealth()).telegramFailures, 2);
 });
 
-test("stops before verification when the quota reserve is reached", async () => {
+test("stops before verification when the 1000-credit quota reserve is reached", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-quota-"));
   const state = createMispricingState({ reportsDir });
-  // Two sports; first getOdds reports remaining=100 so the second is deferred.
+  // Two sports; first getOdds reports remaining=1000 so the second is deferred.
   let oddsCalls = 0;
   const summary = await runMispricingScan({
     valueBetsClient: {
@@ -351,7 +351,7 @@ test("stops before verification when the quota reserve is reached", async () => 
       },
       async getOdds() {
         oddsCalls += 1;
-        return { data: referenceOdds(), receivedAt: now.toISOString(), quota: { remaining: 100, lastCost: 1 } };
+        return { data: referenceOdds(), receivedAt: now.toISOString(), quota: { remaining: 1000, lastCost: 1 } };
       },
     },
     telegramClient: { async sendMispricing() { return { messageId: "1" }; }, async sendText() { return { messageId: "t" }; } },
@@ -363,7 +363,7 @@ test("stops before verification when the quota reserve is reached", async () => 
     reportsDir, now,
   });
   assert.equal(oddsCalls, 1);
-  assert.equal(summary.quotaRemaining, 100);
+  assert.equal(summary.quotaRemaining, 1000);
   assert.ok(summary.deferred >= 1);
 });
 

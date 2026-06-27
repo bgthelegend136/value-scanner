@@ -14,7 +14,7 @@ import {
 import { normalizeTheOddsResponse } from "./theodds_normalize.mjs";
 
 const BOOKMAKERS = ["Stoiximan", "Novibet"];
-const QUOTA_RESERVE = 100;
+const QUOTA_RESERVE = 1000;
 const PRIMARY_REFERENCE_SOURCE = "the-odds-api";
 const FALLBACK_REASONS = new Set([
   "NO_EVENT_MATCH",

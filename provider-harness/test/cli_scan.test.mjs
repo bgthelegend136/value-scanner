@@ -51,8 +51,8 @@ function fakeOddsApiClient(calls) {
 function fakeTheOddsClient(calls) {
   return {
     async listSports() { calls.push(["theodds.sports"]); return { data: [{ key: "soccer_fifa_world_cup", group: "Soccer", title: "FIFA World Cup", active: true }] }; },
-    async listEvents(args) { calls.push(["theodds.events", args]); return { data: theOddsEvents, receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 500, used: 0, lastCost: 0 } }; },
-    async getOdds(args) { calls.push(["theodds.odds", args]); return { data: theOddsOdds, receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 498, used: 2, lastCost: 2 } }; },
+    async listEvents(args) { calls.push(["theodds.events", args]); return { data: theOddsEvents, receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 20000, used: 0, lastCost: 0 } }; },
+    async getOdds(args) { calls.push(["theodds.odds", args]); return { data: theOddsOdds, receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 19998, used: 2, lastCost: 2 } }; },
   };
 }
 
@@ -148,8 +148,8 @@ test("scan covers every in-season mapped league and tags paper bets with sportKe
   };
   const theOdds = {
     async listSports() { return { data: Object.keys(leagues).map((key) => ({ key, group: "Soccer", title: "x", active: true })) }; },
-    async listEvents(args) { return { data: [leagues[args.sportKey].ref], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 490 } }; },
-    async getOdds(args) { return { data: refOdds(leagues[args.sportKey].ref), receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 488 } }; },
+    async listEvents(args) { return { data: [leagues[args.sportKey].ref], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 19990 } }; },
+    async getOdds(args) { return { data: refOdds(leagues[args.sportKey].ref), receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 19988 } }; },
   };
 
   let out = "";
@@ -170,12 +170,12 @@ test("scan covers every in-season mapped league and tags paper bets with sportKe
   assert.match(ledger, /^br1,222,.*soccer_brazil_serie_b$/m);
 });
 
-test("scan stops early when The Odds API quota falls below the floor", async () => {
+test("scan stops early when The Odds API quota falls below the 1000-credit CLV reserve", async () => {
   let oddsCalls = 0;
   const theOdds = {
     async listSports() { return { data: [{ key: "soccer_a", group: "Soccer", title: "A", active: true }, { key: "soccer_b", group: "Soccer", title: "B", active: true }] }; },
-    async listEvents() { return { data: [], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 50 } }; },
-    async getOdds() { oddsCalls += 1; return { data: [], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 50 } }; },
+    async listEvents() { return { data: [], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 999 } }; },
+    async getOdds() { oddsCalls += 1; return { data: [], receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 999 } }; },
   };
   const oddsClient = { async listEvents() { return { data: [], receivedAt: "x", rateLimit: {} }; }, async getOddsMulti() { return { data: [] }; } };
   let out = "";
@@ -188,7 +188,7 @@ test("scan stops early when The Odds API quota falls below the floor", async () 
     loadRegistry: async () => new Map([["football|a", "soccer_a"], ["football|b", "soccer_b"]]),
   });
   assert.equal(code, 0);
-  assert.match(out, /Stopping scan: The Odds API quota 50 is below the 60-credit floor/);
+  assert.match(out, /Stopping scan: The Odds API quota 999 is below the 1000-credit floor/);
   assert.equal(oddsCalls, 1); // stopped after the first league, never queried the second
 });
 

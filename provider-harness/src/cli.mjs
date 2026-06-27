@@ -50,7 +50,7 @@ const REFERENCE_BOOKMAKER = "pinnacle";
 // Quota guard: stop a multi-league scan once The Odds API monthly credits drop
 // below this floor, so the autoscan can never drain the budget to zero. The
 // reserve leaves room for CLV capture (the irreplaceable spend).
-const MIN_SCAN_QUOTA = 60;
+const MIN_SCAN_QUOTA = 1000;
 const SCAN_COLUMNS = [
   "bookmaker", "eventId", "kickoffUtc", "homeTeam", "awayTeam",
   "market", "line", "outcome", "decimalOdds", "fairOdds", "fairProbability",

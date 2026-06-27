@@ -63,6 +63,15 @@ export function createTheOddsApiClient({
     }) {
       return request(`/sports/${sportKey}/events/${eventId}/odds`, { regions, markets, oddsFormat });
     },
+    getHistoricalOdds({
+      sportKey,
+      date,
+      regions = "eu",
+      markets = "h2h,totals",
+      oddsFormat = "decimal",
+    }) {
+      return request(`/historical/sports/${sportKey}/odds`, { date, regions, markets, oddsFormat });
+    },
     getScores({ sportKey, daysFrom = 3, dateFormat = "iso" }) {
       return request(`/sports/${sportKey}/scores`, { daysFrom, dateFormat });
     },

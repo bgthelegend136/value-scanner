@@ -166,3 +166,43 @@ test("calls the event odds endpoint for additional markets", async () => {
   assert.deepEqual(response.data, { id: "evt-1" });
   assert.deepEqual(response.quota, { remaining: 441, used: 59, lastCost: 6 });
 });
+
+test("calls the historical odds endpoint and leaves wrapped data intact", async () => {
+  const urls = [];
+  const historicalPayload = {
+    timestamp: "2025-08-16T14:55:00Z",
+    previous_timestamp: "2025-08-16T14:50:00Z",
+    next_timestamp: "2025-08-16T15:00:00Z",
+    data: [{ id: "evt-1" }],
+  };
+  const client = createTheOddsApiClient({
+    apiKey: "secret",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonResponse(historicalPayload, {
+        headers: {
+          "x-requests-remaining": "19980",
+          "x-requests-used": "20",
+          "x-requests-last": "20",
+        },
+      });
+    },
+  });
+
+  const response = await client.getHistoricalOdds({
+    sportKey: "soccer_epl",
+    date: "2025-08-16T14:55:00Z",
+    regions: "eu",
+    markets: "h2h,totals",
+  });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/v4/historical/sports/soccer_epl/odds");
+  assert.equal(url.searchParams.get("date"), "2025-08-16T14:55:00Z");
+  assert.equal(url.searchParams.get("apiKey"), "secret");
+  assert.equal(url.searchParams.get("regions"), "eu");
+  assert.equal(url.searchParams.get("markets"), "h2h,totals");
+  assert.equal(url.searchParams.get("oddsFormat"), "decimal");
+  assert.deepEqual(response.data, historicalPayload);
+  assert.deepEqual(response.quota, { remaining: 19980, used: 20, lastCost: 20 });
+});
