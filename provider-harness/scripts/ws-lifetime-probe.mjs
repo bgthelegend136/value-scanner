@@ -83,6 +83,15 @@ function splitOption(argv, name) {
     .filter(Boolean);
 }
 
+export function targetBookmakersFromArgv(argv) {
+  const target = String(option(argv, "target-bookmakers", "")).trim();
+  if (target.toUpperCase() === "ALL") return null;
+  const names = target
+    ? target.split(",").map((item) => item.trim()).filter(Boolean)
+    : splitOption(argv, "bookmakers");
+  return names.length ? new Set(names) : TARGET_BOOKMAKERS;
+}
+
 function finiteOdds(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
@@ -868,8 +877,7 @@ async function runProbe(argv = process.argv.slice(2)) {
     : null;
   const durationMinutes = numericOption(argv, "duration-minutes", 120);
   const referenceTtlMs = numericOption(argv, "reference-ttl-seconds", 60) * 1000;
-  const targetBookmakers = new Set(splitOption(argv, "bookmakers"));
-  const effectiveBookmakers = targetBookmakers.size ? targetBookmakers : TARGET_BOOKMAKERS;
+  const effectiveBookmakers = targetBookmakersFromArgv(argv);
   const explicitSportKey = option(argv, "sport-key", "");
   const referenceCache = new Map();
   const liveEventStates = new Map();
@@ -897,6 +905,7 @@ async function runProbe(argv = process.argv.slice(2)) {
       lastSeq: state.lastSeq,
     });
     console.log(`Connecting ${redactWsUrl(url)}`);
+    console.log(`Measurement target bookmakers: ${effectiveBookmakers ? [...effectiveBookmakers].join(",") : "ALL"}`);
     ws = new WebSocket(url);
 
     ws.onopen = () => {

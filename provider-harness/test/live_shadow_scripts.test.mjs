@@ -15,6 +15,7 @@ test("live-shadow runner invokes websocket probe in measurement-only live mode",
   assert.match(source, /--status=live/);
   assert.match(source, /--channels=odds,scores,status/);
   assert.match(source, /--markets=ML,Totals/);
+  assert.match(source, /--target-bookmakers=ALL/);
   assert.match(source, /--duration-minutes=120/);
   assert.match(source, /reports[\\/]logs/);
   assert.match(source, /live-shadow-\$Stamp\.log/);

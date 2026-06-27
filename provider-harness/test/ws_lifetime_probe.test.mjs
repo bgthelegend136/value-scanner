@@ -18,6 +18,7 @@ import {
   liveFeedStatsRow,
   liveTrainingPath,
   liveShadowAuditPath,
+  targetBookmakersFromArgv,
   redactWsUrl,
 } from "../scripts/ws-lifetime-probe.mjs";
 
@@ -191,6 +192,15 @@ test("live feed stats path is enabled for shadow or training probes", () => {
   assert.equal(
     liveFeedStatsPath({ argv: ["--feed-stats-output=C:\\tmp\\feed.csv"], reportsDir: "reports" }),
     "C:\\tmp\\feed.csv",
+  );
+});
+
+test("target bookmaker option can widen measurement-only live training", () => {
+  assert.deepEqual([...targetBookmakersFromArgv([])], ["Stoiximan", "Novibet"]);
+  assert.equal(targetBookmakersFromArgv(["--target-bookmakers=ALL"]), null);
+  assert.deepEqual(
+    [...targetBookmakersFromArgv(["--target-bookmakers=Bet365,Unibet"])],
+    ["Bet365", "Unibet"],
   );
 });
 

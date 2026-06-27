@@ -34,6 +34,20 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (live coverage widening attempt).** Added
+> `--target-bookmakers=ALL` to the measurement-only WebSocket probe and live
+> shadow runner so local training/audit filters no longer discard non
+> Stoiximan/Novibet odds if the provider account sends them. Runtime
+> `Bet-Live-Shadow` was restarted on the new runner; an orphan old process was
+> stopped, leaving one probe with `--target-bookmakers=ALL`. Provider-side
+> widening is blocked: official `PUT /bookmakers/selected/select` returned 403
+> for both 5-book and 2-book widening attempts:
+> "allowed max 2 bookmakers; allowed: Stoiximan, Novibet". REST `GET /odds` for
+> Bet365/Unibet also returned 403 under the same account restriction. Therefore
+> live training can only accelerate after the Odds-API.io plan/allowed
+> bookmakers are changed, or by using a different provider path. Verification:
+> full `npm test` / `node --test` **238/238 passing**.
+>
 > **Status update 2026-06-27 (quant methodology fixes).** Fixed two audit
 > failures without changing Telegram/live-alert rules. First, the scheduled
 > paper runner no longer passes `--sample-repeat`; future `Bet-Paper-Scan`
