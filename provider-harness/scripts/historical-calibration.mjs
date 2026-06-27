@@ -188,15 +188,35 @@ function predictionsForEvent(eventPayload, match, receivedAt, snapshotAt) {
   return methods;
 }
 
-function findHistoricalEventForMatch(events, match) {
-  const home = normalizeName(match.homeTeam);
-  const away = normalizeName(match.awayTeam);
+function nameTokens(value) {
+  return normalizeName(value).split(" ").filter((token) => token.length > 0);
+}
+
+// football-data.org and The Odds API spell clubs differently ("Deportivo Alavés"
+// vs "Alavés", "Levante UD" vs "Levante", "FC Barcelona" vs "Barcelona"). Treat two
+// names as the same club when the shorter token set is fully contained in the longer
+// one AND they share a distinctive token (length >= 4). This accepts prefix/suffix
+// variants while still keeping e.g. "Real Madrid" and "Real Sociedad" apart (neither
+// token set is a subset of the other).
+export function clubNameMatches(a, b) {
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  if (ta.length === 0 || tb.length === 0) return false;
+  const [small, big] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  const bigSet = new Set(big);
+  if (!small.every((token) => bigSet.has(token))) return false;
+  return small.some((token) => token.length >= 4);
+}
+
+export function findHistoricalEventForMatch(events, match) {
   const day = dateOnly(match.kickoffUtc);
-  return (events ?? []).find((event) =>
-    normalizeName(event.home_team) === home &&
-    normalizeName(event.away_team) === away &&
-    dateOnly(event.commence_time) === day,
-  ) ?? null;
+  const candidates = (events ?? []).filter((event) =>
+    dateOnly(event.commence_time) === day &&
+    clubNameMatches(event.home_team, match.homeTeam) &&
+    clubNameMatches(event.away_team, match.awayTeam),
+  );
+  // Fail closed on ambiguity: only pair when exactly one snapshot event fits.
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 function groupBy(items, keyFn) {

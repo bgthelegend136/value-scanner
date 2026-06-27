@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   calibrationCsvRows,
+  clubNameMatches,
   filterFinishedMatches,
+  findHistoricalEventForMatch,
   scoreCalibrationRows,
   snapshotIsoForKickoff,
 } from "../scripts/historical-calibration.mjs";
@@ -58,6 +60,29 @@ test("historical calibration helpers filter finished outcome coverage and pick p
   assert.equal(matches.length, 1);
   assert.equal(matches[0].actualOutcome, "1");
   assert.equal(snapshotIsoForKickoff("2025-08-16T15:00:00Z", 5), "2025-08-16T14:55:00Z");
+});
+
+test("clubNameMatches accepts prefix/suffix spelling variants but keeps distinct clubs apart", () => {
+  // Real spelling differences seen in La Liga 2025/26 (FD vs The Odds API).
+  assert.ok(clubNameMatches("Deportivo Alavés", "Alavés"));
+  assert.ok(clubNameMatches("Levante UD", "Levante"));
+  assert.ok(clubNameMatches("FC Barcelona", "Barcelona"));
+  assert.ok(clubNameMatches("Real Madrid CF", "Real Madrid"));
+  // Must NOT collapse two different clubs that share only a generic token.
+  assert.ok(!clubNameMatches("Real Madrid", "Real Sociedad"));
+  assert.ok(!clubNameMatches("Athletic Bilbao", "Athletic Club"));
+  assert.ok(!clubNameMatches("", "Barcelona"));
+});
+
+test("findHistoricalEventForMatch pairs FD matches to snapshot events by tolerant name + day, failing closed on ambiguity", () => {
+  const events = [
+    { home_team: "Alavés", away_team: "Levante", commence_time: "2025-08-16T19:30:00Z" },
+    { home_team: "Valencia", away_team: "Real Sociedad", commence_time: "2025-08-16T19:30:00Z" },
+  ];
+  const match = { homeTeam: "Deportivo Alavés", awayTeam: "Levante UD", kickoffUtc: "2025-08-16T19:30:00Z" };
+  assert.equal(findHistoricalEventForMatch(events, match)?.home_team, "Alavés");
+  // Wrong day → no pairing.
+  assert.equal(findHistoricalEventForMatch(events, { ...match, kickoffUtc: "2025-08-17T19:30:00Z" }), null);
 });
 
 test("historical calibration CSV rows flatten validation metrics and reliability bins", () => {

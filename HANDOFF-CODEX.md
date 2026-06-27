@@ -34,6 +34,19 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (historical calibration — first real result).** Fixed a
+> name-matching bug in `scripts/historical-calibration.mjs` (it calibrated 0 events
+> before: required exact normalized names, but football-data.org spells clubs differently
+> from The Odds API — "Deportivo Alavés" vs "Alavés"). New `clubNameMatches` (token-subset
+> + distinctive token, fail-closed on ambiguity), +2 tests, `node --test` 215/215. Ran the
+> full La Liga (`PD`, Aug–Dec 2025) calibration: 153/171 events, ~3,420 cr (quota 16,104).
+> **All 4 de-vig methods beat the naive baseline** (Brier ~0.525 vs 0.640; logLoss ~0.89
+> vs 1.06); method choice barely matters. Reliability roughly calibrated, mild ~3–4pp
+> over-prediction in the 20–40% bucket. **Takeaway:** the fair-value engine is sound, so
+> the low bet count is NOT a probability bug — ≥10% soft-book mistakes are genuinely rare;
+> small longshot "edges" are slightly optimistic, treat skeptically when the floor is
+> eventually lowered. Next gate stays forward CLV volume (~200 settled). See WORKLOG.
+>
 > **Status update 2026-06-27 (WebSocket probe corrected to strict EV).** The
 > owner clarified that the Iraq 17→12 example was only a latency example; the
 > measurement target is **not** raw odds (no `--min-odds=15`) but strict
