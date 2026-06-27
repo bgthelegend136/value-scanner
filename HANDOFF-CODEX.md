@@ -34,6 +34,23 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (forensic audit implemented and run).** Added a
+> read-only forensic audit command:
+> `node src/cli.mjs forensic-audit [--max-credits=N]`. It writes gitignored
+> `reports/forensic-audit-summary.json`,
+> `reports/forensic-audit-findings.csv`, and
+> `reports/forensic-audit-report.md`, with hard cap `maxCredits <= 1000` and
+> conservative 30-credit estimates per paid sport probe. Live run with
+> `--max-credits=1000` used 6 The Odds API probes (`h2h,totals`), estimated
+> 180 credits, actual **12** credits, quota after final probe **15872**. Main
+> findings: paper rows **299** but only **84** unique selection keys
+> (`215` repeat observations), CLV captured **19**, settled **7**, live
+> status rows **32** but live training rows **0**, one WebSocket probe process
+> running. Interpretation: current row volume is not independent evidence;
+> no ROI/model conclusion yet; live connection is alive but not producing
+> odds-training rows. Verification: focused TDD plus full `npm test` /
+> `node --test` **235/235 passing**.
+>
 > **Status update 2026-06-27 (live training pipeline enabled).** P8 live remains
 > measurement-only: no Telegram, no auto-betting, no scraping/login, and no
 > 10% alert-floor change. `scripts/ws-lifetime-probe.mjs` now has opt-in

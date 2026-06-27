@@ -1409,6 +1409,18 @@ export async function runCli(argv, deps = {}) {
     if (command === "value-flow-report") {
       return await runValueFlowReport({ out, reportsDir, now });
     }
+    if (command === "forensic-audit") {
+      const { runForensicAudit } = await import("../scripts/forensic-audit.mjs");
+      return await runForensicAudit({
+        argv: [
+          `--reports-dir=${reportsDir}`,
+          ...rest,
+        ],
+        out,
+        err,
+        now,
+      });
+    }
     if (command === "mispricing-clv") {
       return await runMispricingClv({
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
@@ -1482,7 +1494,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;
