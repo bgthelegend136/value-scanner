@@ -308,3 +308,49 @@ test("scan prices totals markets and records totals paper bets", async () => {
   assert.equal(rows[0].line, "2.5");
   assert.equal(rows[0].outcome, "OVER");
 });
+
+test("scan can add a capped control sample below the value threshold", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-sample-"));
+  let out = "";
+  const code = await runCli(["scan", "--edge=5", "--sample-min-ev=-5", "--sample-limit=2"], {
+    out: (text) => { out += text; },
+    err: () => {},
+    loadApiKey: async () => ODDS_KEY,
+    loadTheOddsKey: async () => THEODDS_KEY,
+    createClient: () => fakeOddsApiClient([]),
+    createTheOddsClient: () => fakeTheOddsClient([]),
+    reportsDir,
+    now: () => new Date("2026-06-24T12:00:05.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.match(out, /Sampled 2 paper observation/);
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows.length, 3);
+  assert.equal(rows.filter((row) => row.tier === "CONTROL").length, 2);
+  assert.equal(rows.filter((row) => row.tier !== "CONTROL").length, 1);
+  assert.ok(rows.filter((row) => row.tier === "CONTROL").every((row) => Number(row.ev) >= -0.05));
+  assert.ok(rows.every((row) => row.status === "PENDING"));
+});
+
+test("scan sample-repeat records the same selection in later snapshots", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-repeat-sample-"));
+  const deps = (iso) => ({
+    out: () => {},
+    err: () => {},
+    loadApiKey: async () => ODDS_KEY,
+    loadTheOddsKey: async () => THEODDS_KEY,
+    createClient: () => fakeOddsApiClient([]),
+    createTheOddsClient: () => fakeTheOddsClient([]),
+    reportsDir,
+    now: () => new Date(iso),
+  });
+
+  const args = ["scan", "--edge=0", "--sample-min-ev=-5", "--sample-limit=2", "--sample-repeat"];
+  assert.equal(await runCli(args, deps("2026-06-24T12:00:05.000Z")), 0);
+  assert.equal(await runCli(args, deps("2026-06-24T13:00:05.000Z")), 0);
+
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows.length, 6);
+  assert.equal(new Set(rows.map((row) => row.firstSeenAt)).size, 2);
+});

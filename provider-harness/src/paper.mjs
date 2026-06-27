@@ -49,14 +49,16 @@ function validateRow(row) {
   }
 }
 
-export function paperBetKey(row) {
-  return [
+export function paperBetKey(row, { includeFirstSeenAt = false } = {}) {
+  const parts = [
     row.referenceEventId,
     row.bookmaker,
     row.market,
     row.line ?? "",
     row.outcome,
-  ].map((value) => String(value)).join("|");
+  ];
+  if (includeFirstSeenAt) parts.push(row.firstSeenAt);
+  return parts.map((value) => String(value)).join("|");
 }
 
 function paperRow({ result, fixture }, firstSeenAt) {
@@ -89,16 +91,17 @@ function paperRow({ result, fixture }, firstSeenAt) {
   };
 }
 
-export function mergePaperBets(existingRows, opportunities, { firstSeenAt }) {
+export function mergePaperBets(existingRows, opportunities, { firstSeenAt, includeFirstSeenAtInKey = false }) {
   for (const row of existingRows) validateRow(row);
   const rows = existingRows.map((row) => ({ ...row }));
-  const keys = new Set(rows.map(paperBetKey));
+  const keyFor = (row) => paperBetKey(row, { includeFirstSeenAt: includeFirstSeenAtInKey });
+  const keys = new Set(rows.map(keyFor));
   let added = 0;
   let duplicates = 0;
 
   for (const opportunity of opportunities) {
     const row = paperRow(opportunity, firstSeenAt);
-    const key = paperBetKey(row);
+    const key = keyFor(row);
     if (keys.has(key)) {
       duplicates += 1;
       continue;

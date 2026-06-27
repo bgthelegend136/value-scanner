@@ -327,6 +327,7 @@ function opportunityRow(result, fixture, consensus) {
 // CLV capture, and settlement can later query the right reference sport.
 async function scanLeague({
   oddsClient, theOddsClient, sport, leagueSlug, sportKey, threshold, targetBookmakers,
+  sampleMinEv = null,
 }) {
   const referenceEventsRaw = await theOddsClient.listEvents({ sportKey });
   const referenceFixtures = toFixtureList(referenceEventsRaw.data ?? [], (e) => ({
@@ -373,6 +374,7 @@ async function scanLeague({
   }
 
   const opportunities = [];
+  const sampleControls = [];
   const allRows = [];
   for (const pair of usablePairs) {
     const refForFixture = referenceSelections.filter((s) => s.eventId === pair.referenceEventId);
@@ -385,12 +387,24 @@ async function scanLeague({
       if (result.status === "NO_REFERENCE") continue;
       allRows.push(scanRow(result));
       if (result.status !== "NO_VALUE") opportunities.push({ result, fixture: pair, consensus });
+      if (
+        result.status === "NO_VALUE" &&
+        Number.isFinite(sampleMinEv) &&
+        result.ev >= sampleMinEv
+      ) {
+        sampleControls.push({
+          result: { ...result, status: "CONTROL" },
+          fixture: pair,
+          consensus,
+        });
+      }
     }
   }
 
   return {
     matchedFixtures: pairs.length,
     opportunities,
+    sampleControls,
     allRows,
     quotaRemaining: referenceOdds.quota?.remaining,
   };
@@ -400,6 +414,9 @@ async function runScan({
   loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
   loadRegistry = loadSportRegistry, registryPath = DEFAULT_SPORT_MAP,
   targetBookmakers = TARGET_BOOKMAKERS,
+  sampleMinEv = null,
+  sampleLimit = 0,
+  sampleRepeat = false,
 }) {
   const oddsClient = createClient({ apiKey: await loadApiKey() });
   const theOddsClient = createTheOddsClient({ apiKey: await loadTheOddsKey() });
@@ -419,12 +436,21 @@ async function runScan({
   }
 
   const opportunities = [];
+  const sampleControls = [];
   const allRows = [];
   let matchedFixtures = 0;
   let quotaRemaining;
   for (const league of leagues) {
-    const result = await scanLeague({ oddsClient, theOddsClient, ...league, threshold, targetBookmakers });
+    const result = await scanLeague({
+      oddsClient,
+      theOddsClient,
+      ...league,
+      threshold,
+      targetBookmakers,
+      sampleMinEv,
+    });
     opportunities.push(...result.opportunities);
+    sampleControls.push(...result.sampleControls);
     allRows.push(...result.allRows);
     matchedFixtures += result.matchedFixtures;
     if (result.quotaRemaining !== undefined) quotaRemaining = result.quotaRemaining;
@@ -435,6 +461,10 @@ async function runScan({
   }
 
   opportunities.sort((a, b) => b.result.ev - a.result.ev);
+  sampleControls.sort((a, b) => b.result.ev - a.result.ev);
+  const sampledControls = sampleLimit > 0
+    ? sampleControls.slice(0, sampleLimit)
+    : sampleControls;
 
   const header = `Value scan — ${leagues.length} in-season league${leagues.length === 1 ? "" : "s"}, ${matchedFixtures} matched fixtures, ${opportunities.length} value bets (EV >= ${(threshold * 100).toFixed(1)}%).`;
   out(`${header}\n\n`);
@@ -453,10 +483,22 @@ async function runScan({
   const existingPaperBets = await readCsvIfPresent(ledgerPath);
   const merged = mergePaperBets(existingPaperBets, opportunities, {
     firstSeenAt: now().toISOString(),
+    includeFirstSeenAtInKey: sampleRepeat,
   });
-  await writeCsv(ledgerPath, merged.rows, PAPER_COLUMNS);
+  const sampledMerged = mergePaperBets(merged.rows, sampledControls, {
+    firstSeenAt: now().toISOString(),
+    includeFirstSeenAtInKey: sampleRepeat,
+  });
+  await writeCsv(ledgerPath, sampledMerged.rows, PAPER_COLUMNS);
   out(`Recorded ${merged.added} new paper bet${merged.added === 1 ? "" : "s"}.\n`);
   out(`Skipped ${merged.duplicates} duplicate paper bet${merged.duplicates === 1 ? "" : "s"}.\n`);
+  if (Number.isFinite(sampleMinEv)) {
+    out(
+      `Sampled ${sampledMerged.added} paper observation${sampledMerged.added === 1 ? "" : "s"} ` +
+      `from EV >= ${(sampleMinEv * 100).toFixed(1)}% controls.\n`,
+    );
+    out(`Skipped ${sampledMerged.duplicates} duplicate sampled observation${sampledMerged.duplicates === 1 ? "" : "s"}.\n`);
+  }
   return 0;
 }
 
@@ -1315,6 +1357,15 @@ export async function runCli(argv, deps = {}) {
       const edgeArg = rest.find((a) => a.startsWith("--edge="));
       const parsed = edgeArg ? Number(edgeArg.split("=")[1]) / 100 : 0.02;
       const threshold = Number.isFinite(parsed) ? parsed : 0.02;
+      const sampleMinEvArg = rest.find((a) => a.startsWith("--sample-min-ev="));
+      const parsedSampleMinEv = sampleMinEvArg ? Number(sampleMinEvArg.split("=")[1]) / 100 : null;
+      const sampleMinEv = Number.isFinite(parsedSampleMinEv) ? parsedSampleMinEv : null;
+      const sampleLimitArg = rest.find((a) => a.startsWith("--sample-limit="));
+      const parsedSampleLimit = sampleLimitArg ? Number(sampleLimitArg.split("=")[1]) : 0;
+      const sampleLimit = Number.isFinite(parsedSampleLimit) && parsedSampleLimit > 0
+        ? Math.floor(parsedSampleLimit)
+        : 0;
+      const sampleRepeat = rest.includes("--sample-repeat");
       const bookmakerArg = rest.find((a) => a.startsWith("--bookmakers="));
       const targetBookmakers = bookmakerArg
         ? parseBookmakers(bookmakerArg.slice("--bookmakers=".length))
@@ -1325,7 +1376,7 @@ export async function runCli(argv, deps = {}) {
       }
       return await runScan({
         loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
-        loadRegistry, registryPath: sportMapPath, targetBookmakers,
+        loadRegistry, registryPath: sportMapPath, targetBookmakers, sampleMinEv, sampleLimit, sampleRepeat,
       });
     }
     if (command === "settle") {
@@ -1431,7 +1482,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

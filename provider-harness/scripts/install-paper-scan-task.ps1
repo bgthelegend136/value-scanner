@@ -43,12 +43,12 @@ $Action = New-ScheduledTaskAction `
   -Execute $PowerShell `
   -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Runner`""
 
-# Repeat every 4 hours under the 20K paid plan so paper collection accelerates
+# Repeat hourly under the 20K paid plan so paper/control collection accelerates
 # while the 1000-credit code guards keep a CLV reserve. The 3650-day duration
 # avoids the [TimeSpan]::MaxValue bug in New-ScheduledTaskTrigger.
 # -StartWhenAvailable backfills runs missed while the machine was asleep.
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
-  -RepetitionInterval (New-TimeSpan -Hours 4) `
+  -RepetitionInterval (New-TimeSpan -Hours 1) `
   -RepetitionDuration (New-TimeSpan -Days 3650)
 
 $Settings = New-ScheduledTaskSettingsSet `
@@ -68,7 +68,7 @@ Register-ScheduledTask `
   -Trigger $Trigger `
   -Settings $Settings `
   -Principal $Principal `
-  -Description 'Paper-only: records +EV value bets across in-season leagues. No Telegram.' `
+  -Description 'Paper-only: records value/control observations across in-season leagues. No Telegram.' `
   -Force | Out-Null
 
 Get-ScheduledTask -TaskName $TaskName

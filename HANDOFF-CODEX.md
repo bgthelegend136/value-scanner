@@ -34,6 +34,20 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (fast paper volume mode).** To make ~200 paper
+> observations reachable today/tomorrow, paper `scan` now has opt-in sampling flags:
+> `--sample-min-ev=N`, `--sample-limit=M`, and `--sample-repeat`. The aggressive
+> runner uses `node src/cli.mjs scan --edge=0 --sample-min-ev=-5 --sample-limit=250
+> --sample-repeat`, so it records all positive-EV paper rows plus a capped `CONTROL`
+> sample down to -5% EV. `--sample-repeat` treats the same selection in a later scan
+> timestamp as a distinct paper observation for CLV-vs-EV regression; default scan
+> dedupe behavior is unchanged. `Bet-Paper-Scan` was reinstalled hourly (`PT1H`,
+> `WakeToRun=True`). Live application: paper ledger grew from 28 to **154** rows
+> after two manual scans (`CONTROL=108`, `VALUE=46`, `MATCH_RESULT=134`,
+> `TOTALS=20`); the next hourly run should push it over ~200 if inventory is similar.
+> Telegram/live-alert rules and the 10% floor are unchanged. Verification:
+> focused TDD plus full `npm test` / `node --test` **224/224 passing**.
+>
 > **Status update 2026-06-27 (P8 live-shadow measurement enabled).** P8 moved from
 > scope-only into **measurement-only live shadowing**, still with no Telegram, no
 > auto-betting, no scraping/login, and no 10% floor change. `scripts/ws-lifetime-probe.mjs`

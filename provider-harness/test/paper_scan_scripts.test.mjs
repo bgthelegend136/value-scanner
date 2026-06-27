@@ -8,7 +8,7 @@ test("paper-scan runner runs scan only and writes a transcript log", async () =>
     "utf8",
   );
 
-  assert.match(source, /node src[\\/]cli\.mjs scan --edge=0\.5/);
+  assert.match(source, /node src[\\/]cli\.mjs scan --edge=0 --sample-min-ev=-5 --sample-limit=250 --sample-repeat/);
   assert.doesNotMatch(source, /node src[\\/]cli\.mjs clv/);
   assert.match(source, /reports[\\/]logs/);
   assert.match(source, /Start-Transcript/);
@@ -17,7 +17,7 @@ test("paper-scan runner runs scan only and writes a transcript log", async () =>
   assert.doesNotMatch(source, /TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|mispricing-scan/);
 });
 
-test("paper-scan installer repeats every 4 hours without a 3-day auto-stop and needs no Telegram keys", async () => {
+test("paper-scan installer repeats hourly without a 3-day auto-stop and needs no Telegram keys", async () => {
   const source = await readFile(
     new URL("../scripts/install-paper-scan-task.ps1", import.meta.url),
     "utf8",
@@ -26,7 +26,7 @@ test("paper-scan installer repeats every 4 hours without a 3-day auto-stop and n
   assert.match(source, /Bet-Paper-Scan/);
   assert.match(source, /run-paper-scan\.ps1/);
   assert.match(source, /-RepetitionInterval/);
-  assert.match(source, /New-TimeSpan -Hours 4/);
+  assert.match(source, /New-TimeSpan -Hours 1/);
   assert.doesNotMatch(source, /New-TimeSpan -Days 3\b/);
   assert.doesNotMatch(source, /StopAtDurationEnd/);
   assert.match(source, /-Once\b/);
