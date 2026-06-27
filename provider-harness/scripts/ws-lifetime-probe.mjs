@@ -40,10 +40,20 @@ const STRICT_CSV_COLUMNS = [
   "consensusBooks", "minimumConfirmedEv", "edgeOverDispersion",
   "startSeq", "endSeq", "startTimestamp", "endTimestamp", "endReason",
 ];
+const STRICT_AUDIT_COLUMNS = [
+  "observedAt", "seq", "providerEventId", "referenceEventId", "sportKey",
+  "bookmaker", "match", "market", "line", "outcome", "offeredOdds",
+  "status", "reason", "pinnacleEv", "consensusEv", "consensusBooks",
+  "minimumConfirmedEv", "edgeOverDispersion",
+];
 
 function option(argv, name, fallback = undefined) {
   const hit = argv.find((arg) => arg.startsWith(`--${name}=`));
   return hit ? hit.slice(name.length + 3) : fallback;
+}
+
+function hasFlag(argv, name) {
+  return argv.includes(`--${name}`);
 }
 
 function numericOption(argv, name, fallback) {
@@ -116,6 +126,12 @@ export function redactWsUrl(value) {
   const url = new URL(value);
   if (url.searchParams.has("apiKey")) url.searchParams.set("apiKey", "REDACTED");
   return url.toString();
+}
+
+export function liveShadowAuditPath({ argv, reportsDir }) {
+  const explicit = option(argv, "audit-output", "");
+  if (explicit) return explicit;
+  return hasFlag(argv, "live-shadow") ? join(reportsDir, "ws-live-shadow-audit.csv") : "";
 }
 
 export function createLifetimeState() {
@@ -287,6 +303,29 @@ function closeStrictEntry(entry, {
   };
 }
 
+function strictAuditRow(candidate, { sportKey = "", confirmation = {}, timestamp, seq }) {
+  return {
+    observedAt: isoFromTimestamp(timestamp),
+    seq: String(seq ?? ""),
+    providerEventId: candidate.providerEventId,
+    referenceEventId: confirmation.referenceEventId ?? "",
+    sportKey,
+    bookmaker: candidate.bookmaker,
+    match: `${candidate.participantOne} - ${candidate.participantTwo}`,
+    market: candidate.market,
+    line: candidate.line,
+    outcome: candidate.outcome,
+    offeredOdds: formatNumber(candidate.offeredOdds),
+    status: confirmation.status ?? "REJECTED",
+    reason: confirmation.reason ?? "",
+    pinnacleEv: formatNumber(confirmation.pinnacleEv),
+    consensusEv: formatNumber(confirmation.consensusEv),
+    consensusBooks: String(confirmation.consensusBooks ?? ""),
+    minimumConfirmedEv: formatNumber(confirmation.minimumConfirmedEv),
+    edgeOverDispersion: formatNumber(confirmation.edgeOverDispersion),
+  };
+}
+
 function closeMatching(state, predicate, context) {
   const closed = [];
   for (const [key, entry] of [...state.active]) {
@@ -431,7 +470,7 @@ async function defaultReferenceSnapshot(referenceClient, sportKey) {
   };
 }
 
-export async function evaluateStrictEvMessage(
+export async function evaluateStrictEvMessageWithAudit(
   state,
   message,
   {
@@ -445,10 +484,12 @@ export async function evaluateStrictEvMessage(
   } = {},
 ) {
   if (message?.seq) state.lastSeq = Number(message.seq);
-  if (!message || message.type === "welcome" || message.type === "score" || message.type === "status") return [];
+  if (!message || message.type === "welcome" || message.type === "score" || message.type === "status") {
+    return { closed: [], audit: [] };
+  }
   if (message.type === "resync_required") {
     state.resyncRequired = message;
-    return [];
+    return { closed: [], audit: [] };
   }
 
   const timestamp = Number.isFinite(Number(message.timestamp))
@@ -456,16 +497,21 @@ export async function evaluateStrictEvMessage(
     : Math.floor(new Date(now).getTime() / 1000);
   const seq = message.seq ?? "";
   const bookmaker = String(message.bookie ?? message.bookmaker ?? "");
-  if (targetBookmakers?.size && bookmaker && !targetBookmakers.has(bookmaker)) return [];
+  if (targetBookmakers?.size && bookmaker && !targetBookmakers.has(bookmaker)) {
+    return { closed: [], audit: [] };
+  }
 
   if (message.type === "deleted" || message.type === "no_markets") {
-    return closeStrictMatching(
+    return {
+      closed: closeStrictMatching(
       state,
       (entry) => entry.providerEventId === String(message.id) && (!bookmaker || entry.bookmaker === bookmaker),
       { reason: message.type === "deleted" ? "DELETED" : "NO_MARKETS", timestamp, seq },
-    );
+      ),
+      audit: [],
+    };
   }
-  if (message.type !== "created" && message.type !== "updated") return [];
+  if (message.type !== "created" && message.type !== "updated") return { closed: [], audit: [] };
 
   const candidates = extractWsCandidates(message, { targetBookmakers, now });
   const activeKeys = new Set(activeSports.filter((sport) => sport.active !== false).map((sport) => sport.key));
@@ -516,8 +562,15 @@ export async function evaluateStrictEvMessage(
   }
 
   const closed = [];
+  const audit = [];
   const seen = new Set(candidates.map((candidate) => candidateIdentity(candidate)));
   for (const [identity, result] of evaluations) {
+    audit.push(strictAuditRow(result.candidate, {
+      sportKey: result.sportKey ?? "",
+      confirmation: result.confirmation,
+      timestamp,
+      seq,
+    }));
     if (result.confirmation.status === "CONFIRMED") {
       openOrUpdateStrict(state, result.candidate, result.confirmation, {
         sportKey: result.sportKey,
@@ -546,6 +599,11 @@ export async function evaluateStrictEvMessage(
     state.active.delete(identity);
   }
 
+  return { closed, audit };
+}
+
+export async function evaluateStrictEvMessage(state, message, options = {}) {
+  const { closed } = await evaluateStrictEvMessageWithAudit(state, message, options);
   return closed;
 }
 
@@ -581,6 +639,8 @@ async function runProbe(argv = process.argv.slice(2)) {
   const state = createLifetimeState();
   const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
   const outputPath = resolve(option(argv, "output", join(reportsDir, "ws-lifetime-log.csv")));
+  const auditOutput = liveShadowAuditPath({ argv, reportsDir });
+  const auditOutputPath = auditOutput ? resolve(auditOutput) : "";
   const durationMinutes = numericOption(argv, "duration-minutes", 120);
   const referenceTtlMs = numericOption(argv, "reference-ttl-seconds", 60) * 1000;
   const targetBookmakers = new Set(splitOption(argv, "bookmakers"));
@@ -628,7 +688,7 @@ async function runProbe(argv = process.argv.slice(2)) {
       if (message.type === "welcome") {
         console.log(`Welcome: channels=${(message.channels ?? []).join(",") || "?"}, bookmakers=${(message.bookmakers ?? []).join(",") || "?"}`);
       }
-      const rows = await evaluateStrictEvMessage(state, message, {
+      const { closed: rows, audit } = await evaluateStrictEvMessageWithAudit(state, message, {
         referenceClient,
         registry,
         activeSports: sportsResponse.data ?? [],
@@ -638,7 +698,9 @@ async function runProbe(argv = process.argv.slice(2)) {
         now: new Date(),
       });
       await appendCsvRows(outputPath, rows, STRICT_CSV_COLUMNS);
+      if (auditOutputPath) await appendCsvRows(auditOutputPath, audit, STRICT_AUDIT_COLUMNS);
       if (rows.length) console.log(`Closed ${rows.length} lifetime row(s); lastSeq=${state.lastSeq || "?"}`);
+      if (auditOutputPath && audit.length) console.log(`Audited ${audit.length} strict EV candidate row(s); lastSeq=${state.lastSeq || "?"}`);
       if (state.resyncRequired) {
         console.error(`resync_required: ${state.resyncRequired.reason ?? "unknown"}; reconnecting with latest seq after close`);
         ws?.close();

@@ -115,6 +115,11 @@ Telegram / betting wiring (respects P8 "scope before building"). Stop when the t
       change. If they live **> ~10 min**, tighten polling cadence (Workstream A) instead —
       don't pay. Use the Iraq/Senegal case to see whether 17→12 was a catchable real edge
       or a stale display (cross-check `/odds/movements`).
+      2026-06-27 follow-up: P8 live-shadow audit is now installed as a scheduled
+      measurement-only collector (`Bet-Live-Shadow`, every 2h). It records every
+      evaluated strict-EV live WebSocket candidate to `reports/ws-live-shadow-audit.csv`
+      and confirmed appear/disappear lifetimes to `reports/ws-lifetime-log.csv`.
+      The buy/don't-buy decision still needs real rows from the running collector.
 - [ ] Verify: connects, logs ≥1 full appear→disappear lifecycle, reconnects via `lastSeq`,
       leaks no secret.
       2026-06-27 Codex smoke: connected successfully for 3 seconds with key redacted
@@ -131,6 +136,9 @@ No build now — document the path for the next milestone:
   placement. Strict dual-confirmation still applies and needs a live sharp reference (The
   Odds API in-play coverage TBD — the open P8 scoping question).
 - Workstream C's instrument is the first concrete step toward this.
+- 2026-06-27 follow-up: `docs/superpowers/plans/2026-06-27-p8-live-shadow-plan.md`
+  documents the implemented live-shadow measurement layer. It is not a betting
+  implementation; it only collects audit/lifetime evidence for future P8 decisions.
 
 ---
 

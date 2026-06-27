@@ -6,6 +6,8 @@ import {
   buildWsUrl,
   createLifetimeState,
   evaluateStrictEvMessage,
+  evaluateStrictEvMessageWithAudit,
+  liveShadowAuditPath,
   redactWsUrl,
 } from "../scripts/ws-lifetime-probe.mjs";
 
@@ -120,6 +122,18 @@ test("ws probe builds replayable URLs and redacts the API key for logs", () => {
   assert.match(redacted, /apiKey=REDACTED/);
 });
 
+test("live shadow audit path is opt-in and can be overridden", () => {
+  assert.equal(liveShadowAuditPath({ argv: [], reportsDir: "reports" }), "");
+  assert.equal(
+    liveShadowAuditPath({ argv: ["--live-shadow"], reportsDir: "reports" }),
+    "reports\\ws-live-shadow-audit.csv",
+  );
+  assert.equal(
+    liveShadowAuditPath({ argv: ["--audit-output=C:\\tmp\\audit.csv"], reportsDir: "reports" }),
+    "C:\\tmp\\audit.csv",
+  );
+});
+
 test("legacy ws probe records a raw high-price lifecycle when an update falls below threshold", () => {
   const state = createLifetimeState();
   const options = { minOdds: 15, targetBookmakers: new Set(["Stoiximan"]) };
@@ -201,6 +215,30 @@ test("strict EV ws probe ignores raw longshot prices that fail dual confirmation
 
   assert.deepEqual(closed, []);
   assert.equal(state.active.size, 0);
+});
+
+test("live shadow audit records rejected strict-EV candidate evaluations", async () => {
+  const state = createLifetimeState();
+  const { closed, audit } = await evaluateStrictEvMessageWithAudit(state, wsMessage({
+    homeOdds: "1.90",
+  }), {
+    referenceClient: referenceClient(),
+    registry: new Map([["football|fifa-world-cup", "soccer_fifa_world_cup"]]),
+    activeSports: [{ key: "soccer_fifa_world_cup", active: true, group: "Soccer", title: "FIFA World Cup" }],
+    now: NOW,
+  });
+
+  assert.deepEqual(closed, []);
+  assert.equal(audit.length, 3);
+  const home = audit.find((row) => row.outcome === "1");
+  assert.equal(home.status, "REJECTED");
+  assert.equal(home.reason, "PINNACLE_EV_BELOW_MIN");
+  assert.equal(home.providerEventId, "evt-501");
+  assert.equal(home.bookmaker, "Stoiximan");
+  assert.equal(home.match, "Japan - Sweden");
+  assert.equal(home.sportKey, "soccer_fifa_world_cup");
+  assert.equal(home.offeredOdds, "1.9000");
+  assert.doesNotMatch(JSON.stringify(home), /secret|apiKey/i);
 });
 
 test("strict EV ws probe closes confirmed lifetimes when markets disappear", async () => {

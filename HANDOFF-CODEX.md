@@ -34,6 +34,20 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (P8 live-shadow measurement enabled).** P8 moved from
+> scope-only into **measurement-only live shadowing**, still with no Telegram, no
+> auto-betting, no scraping/login, and no 10% floor change. `scripts/ws-lifetime-probe.mjs`
+> now has an opt-in `--live-shadow`/`--audit-output` audit stream that records every
+> evaluated strict-EV WebSocket candidate row, including rejected candidates, to
+> `reports/ws-live-shadow-audit.csv`; the original `reports/ws-lifetime-log.csv`
+> remains the appear/disappear lifetime log for confirmed strict `>=10% +EV`
+> candidates. New runner/installer scripts are
+> `scripts/run-live-shadow-probe.ps1` and `scripts/install-live-shadow-task.ps1`.
+> Runtime task `Bet-Live-Shadow` is installed Ready, repeats every 2h, wakes the
+> computer, ignores overlapping runs, and runs for up to 3h. Smoke run connected to
+> Odds-API.io with `status=live` and `channels=odds,scores,status` with redacted key.
+> Verification: focused tests plus full `npm test` / `node --test` **222/222 passing**.
+>
 > **Status update 2026-06-27 (paper market widening + analysis design).** The
 > paper-only collection path now prices both `MATCH_RESULT` and `TOTALS` against
 > Pinnacle reference data. `src/cli.mjs` uses `PAPER_REFERENCE_MARKETS =
