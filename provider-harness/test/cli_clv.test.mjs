@@ -85,7 +85,7 @@ test("clv captures closing line value for pending bets", async () => {
   });
 
   assert.equal(code, 0);
-  assert.deepEqual(calls, [{ sportKey: "soccer_fifa_world_cup" }]);
+  assert.deepEqual(calls, [{ sportKey: "soccer_fifa_world_cup", markets: "h2h,totals" }]);
   const [row] = await readCsv(join(reportsDir, "paper-bets.csv"));
   assert.notEqual(row.clv, "");
   assert.notEqual(row.closingFairOdds, "");
@@ -138,10 +138,63 @@ test("clv accepts a paper-only wider capture window", async () => {
   });
 
   assert.equal(code, 0);
-  assert.deepEqual(calls, [{ sportKey: "soccer_fifa_world_cup" }]);
+  assert.deepEqual(calls, [{ sportKey: "soccer_fifa_world_cup", markets: "h2h,totals" }]);
   const [row] = await readCsv(join(reportsDir, "paper-bets.csv"));
   assert.notEqual(row.clv, "");
   assert.equal(row.clvCapturedAt, "2026-06-25T17:25:00.000Z");
+});
+
+test("clv captures totals paper bets by requesting totals closing markets", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-totals-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [paperRow({
+    market: "TOTALS",
+    line: "2.5",
+    outcome: "OVER",
+    decimalOdds: "2.1500",
+    fairOdds: "1.9342",
+    fairProbability: "0.517000",
+    ev: "0.111550",
+  })], PAPER_COLUMNS);
+  const totalsClosing = [{
+    id: "ref1",
+    sport_title: "FIFA World Cup",
+    commence_time: "2026-06-25T18:00:00Z",
+    home_team: "Spain",
+    away_team: "Cape Verde",
+    bookmakers: [{
+      key: "pinnacle",
+      title: "Pinnacle",
+      last_update: "2026-06-25T17:55:00Z",
+      markets: [{
+        key: "totals",
+        last_update: "2026-06-25T17:55:00Z",
+        outcomes: [
+          { name: "Over", point: 2.5, price: 1.92 },
+          { name: "Under", point: 2.5, price: 1.92 },
+        ],
+      }],
+    }],
+  }];
+  const calls = [];
+  const code = await runCli(["clv"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getOdds(args) {
+        calls.push(args);
+        return { data: totalsClosing, receivedAt: "2026-06-25T17:55:00.000Z", quota: { remaining: 494 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-25T17:55:00.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls, [{ sportKey: "soccer_fifa_world_cup", markets: "h2h,totals" }]);
+  const [row] = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.notEqual(row.clv, "");
+  assert.notEqual(row.closingFairOdds, "");
 });
 
 test("clv queries each pending league's closing line and merges them", async () => {

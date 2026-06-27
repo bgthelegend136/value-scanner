@@ -34,6 +34,24 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (paper market widening + analysis design).** The
+> paper-only collection path now prices both `MATCH_RESULT` and `TOTALS` against
+> Pinnacle reference data. `src/cli.mjs` uses `PAPER_REFERENCE_MARKETS =
+> "h2h,totals"` for paper `scan` and paper `clv`; Telegram/live-alert paths and
+> the 10% floor are unchanged. This follows the official The Odds API `markets`
+> contract (comma-separated markets; quota cost per market/region), and remains
+> protected by the 1000-credit reserve. `value-flow-report` now includes
+> `paper.market` and `scan.latest.market` counters, so widened-market volume is
+> visible locally. Live verification after the change: 18 in-season leagues, 36
+> matched fixtures, 12 value bets, 0 new paper bets / 12 duplicates, quota 16032;
+> latest scan had `MATCH_RESULT` 138 rows and `TOTALS` 26 rows, but all totals
+> were `NO_VALUE` (max totals EV -3.87%), so paper ledger remains
+> `MATCH_RESULT=28`. Manual settlement was run: paper=28, settled=7, pending=21,
+> 5W-2L; `Bet-Paper-Settle` remains Ready with `LastTaskResult=0`. Analysis
+> design is recorded at
+> `docs/superpowers/plans/2026-06-27-forward-clv-analysis-design.md`. Verification:
+> TDD red/green plus `npm test` / `node --test` **218/218 passing**.
+>
 > **Status update 2026-06-27 (forward CLV volume plan applied).** To grow the
 > forward CLV sample after the La Liga calibration showed the fair-value engine
 > is sound, the paper-only collection path was made more aggressive without

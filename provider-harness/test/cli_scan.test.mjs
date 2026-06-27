@@ -232,3 +232,79 @@ test("scan accepts a paper-only bookmaker override", async () => {
   assert.equal(code, 0);
   assert.deepEqual(calls.find((c) => c[0] === "oddsapi.multi")[1].bookmakers, ["Stoiximan"]);
 });
+
+test("scan prices totals markets and records totals paper bets", async () => {
+  const calls = [];
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-totals-"));
+  const totalsReference = [{
+    id: "ref1",
+    sport_title: "FIFA World Cup",
+    commence_time: "2026-06-25T18:00:00Z",
+    home_team: "Spain",
+    away_team: "Cape Verde",
+    bookmakers: [{
+      key: "pinnacle",
+      title: "Pinnacle",
+      last_update: "2026-06-24T12:00:00Z",
+      markets: [{
+        key: "totals",
+        last_update: "2026-06-24T12:00:00Z",
+        outcomes: [
+          { name: "Over", point: 2.5, price: 1.90 },
+          { name: "Under", point: 2.5, price: 1.95 },
+        ],
+      }],
+    }],
+  }];
+  const totalsBettable = {
+    id: 999,
+    home: "Spain",
+    away: "Cape Verde",
+    date: "2026-06-25T18:00:00Z",
+    league: { name: "World Cup" },
+    bookmakers: {
+      Stoiximan: [{
+        name: "Totals",
+        updatedAt: "2026-06-24T12:00:00Z",
+        odds: [{ hdp: "2.5", over: "2.15", under: "1.72" }],
+      }],
+    },
+  };
+  const code = await runCli(["scan", "--edge=0.5"], {
+    out: () => {},
+    err: () => {},
+    loadApiKey: async () => ODDS_KEY,
+    loadTheOddsKey: async () => THEODDS_KEY,
+    createClient: () => ({
+      async listEvents(args) {
+        calls.push(["oddsapi.events", args]);
+        return { data: [oddsApiEvents[0]], receivedAt: "2026-06-24T12:00:05.000Z", rateLimit: { remaining: 99 } };
+      },
+      async getOddsMulti(args) {
+        calls.push(["oddsapi.multi", args]);
+        return { data: [totalsBettable], receivedAt: "2026-06-24T12:00:05.000Z" };
+      },
+    }),
+    createTheOddsClient: () => ({
+      async listSports() { return { data: [{ key: "soccer_fifa_world_cup", group: "Soccer", title: "FIFA World Cup", active: true }] }; },
+      async listEvents(args) {
+        calls.push(["theodds.events", args]);
+        return { data: theOddsEvents, receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 20000 } };
+      },
+      async getOdds(args) {
+        calls.push(["theodds.odds", args]);
+        return { data: totalsReference, receivedAt: "2026-06-24T12:00:05.000Z", quota: { remaining: 19998 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-24T12:00:05.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.equal(calls.find((c) => c[0] === "theodds.odds")[1].markets, "h2h,totals");
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].market, "TOTALS");
+  assert.equal(rows[0].line, "2.5");
+  assert.equal(rows[0].outcome, "OVER");
+});

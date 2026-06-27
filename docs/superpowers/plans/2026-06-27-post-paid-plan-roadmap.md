@@ -57,6 +57,9 @@ paper collection accelerates toward the ~200 settled CLV bets the calibration ne
       in `multisport_map.mjs`). Confirm TOTALS is priced in `scan`.
       2026-06-27 Codex check: current unmapped groups had no active `/sports` matches,
       so no forced mapping was added.
+      2026-06-27 follow-up: paper `scan` and paper `clv` now request
+      `markets=h2h,totals`; latest live scan showed 26 `TOTALS` rows but 0 totals
+      value bets because max totals EV was negative in that snapshot.
 - [x] Verify: live `scan` + `clv` show more matched fixtures/paper rows; guard trips at
       the new floor; `node --test` green.
 

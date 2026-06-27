@@ -47,6 +47,7 @@ const execFileAsync = promisify(execFile);
 
 const TARGET_BOOKMAKERS = ["Novibet", "Stoiximan"];
 const REFERENCE_BOOKMAKER = "pinnacle";
+const PAPER_REFERENCE_MARKETS = "h2h,totals";
 // Quota guard: stop a multi-league scan once The Odds API monthly credits drop
 // below this floor, so the autoscan can never drain the budget to zero. The
 // reserve leaves room for CLV capture (the irreplaceable spend).
@@ -345,7 +346,7 @@ async function scanLeague({
 
   const pairs = matchFixtures(referenceFixtures, bettableFixtures).map((pair) => ({ ...pair, sportKey }));
 
-  const referenceOdds = await theOddsClient.getOdds({ sportKey });
+  const referenceOdds = await theOddsClient.getOdds({ sportKey, markets: PAPER_REFERENCE_MARKETS });
   const allReferenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt);
   const referenceSelections = allReferenceSelections.filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
 
@@ -637,7 +638,7 @@ async function runClv({
   const closing = new Map();
   let quotaRemaining;
   for (const sportKey of pendingSportKeys) {
-    const response = await client.getOdds({ sportKey });
+    const response = await client.getOdds({ sportKey, markets: PAPER_REFERENCE_MARKETS });
     quotaRemaining = response.quota?.remaining ?? quotaRemaining;
     for (const [key, probability] of closingFairByKey(response.data ?? [], response.receivedAt)) {
       closing.set(key, probability);
@@ -767,11 +768,13 @@ async function runValueFlowReport({ out, reportsDir, now }) {
     { scope: "scan.latest", key: "maxEv", value: maxEv(latestScanRows) },
   ];
   addCountRows(reportRows, "paper.bookmaker", countBy(paperRows, (row) => row.bookmaker));
+  addCountRows(reportRows, "paper.market", countBy(paperRows, (row) => row.market));
   addCountRows(reportRows, "paper.sportKey", countBy(paperRows, paperSportKey));
   addCountRows(reportRows, "audit.status", countBy(auditRows, (row) => row.status));
   addCountRows(reportRows, "audit.reason", countBy(auditRows, (row) => row.reason));
   addCountRows(reportRows, "scan.latest.status", countBy(latestScanRows, (row) => row.status));
   addCountRows(reportRows, "scan.latest.bookmaker", countBy(latestScanRows, (row) => row.bookmaker));
+  addCountRows(reportRows, "scan.latest.market", countBy(latestScanRows, (row) => row.market));
 
   const topRejection = [...countBy(
     auditRows.filter((row) => String(row.reason ?? "").trim()),

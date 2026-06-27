@@ -43,7 +43,7 @@ test("value-flow-report summarizes local CSVs without loading API keys", async (
   const reportsDir = await mkdtemp(join(tmpdir(), "value-flow-"));
   await writeCsv(join(reportsDir, "paper-bets.csv"), [
     paperRow({ bookmaker: "Stoiximan", status: "WON", profit: "6.5000", clv: "0.200000", clvCapturedAt: "2026-06-25T17:55:00.000Z" }),
-    paperRow({ referenceEventId: "ref2", bettableEventId: "998", bookmaker: "Novibet", status: "PENDING", clv: "-0.050000", clvCapturedAt: "2026-06-25T17:55:00.000Z" }),
+    paperRow({ referenceEventId: "ref2", bettableEventId: "998", bookmaker: "Novibet", market: "TOTALS", line: "2.5", outcome: "OVER", status: "PENDING", clv: "-0.050000", clvCapturedAt: "2026-06-25T17:55:00.000Z" }),
   ], PAPER_COLUMNS);
   await writeCsv(join(reportsDir, "mispricing-audit.csv"), [
     { auditedAt: "2026-06-25T12:00:00Z", runMode: "LIVE", candidateId: "c1", bookmaker: "Stoiximan", status: "REJECTED", reason: "CANDIDATE_EV_BELOW_MIN" },
@@ -51,9 +51,9 @@ test("value-flow-report summarizes local CSVs without loading API keys", async (
     { auditedAt: "2026-06-25T12:02:00Z", runMode: "LIVE", candidateId: "c3", bookmaker: "Stoiximan", status: "CONFIRMED", reason: "" },
   ], ["auditedAt", "runMode", "candidateId", "bookmaker", "status", "reason"]);
   await writeCsv(join(reportsDir, "scan-all-2026-06-25T12-00-00.000Z.csv"), [
-    { bookmaker: "Stoiximan", ev: "0.0320", status: "VALUE" },
-    { bookmaker: "Novibet", ev: "0.0100", status: "NO_VALUE" },
-  ], ["bookmaker", "ev", "status"]);
+    { bookmaker: "Stoiximan", market: "MATCH_RESULT", ev: "0.0320", status: "VALUE" },
+    { bookmaker: "Novibet", market: "TOTALS", ev: "0.0100", status: "NO_VALUE" },
+  ], ["bookmaker", "market", "ev", "status"]);
 
   let out = "";
   const code = await runCli(["value-flow-report"], {
@@ -71,8 +71,10 @@ test("value-flow-report summarizes local CSVs without loading API keys", async (
   const rows = await readCsv(join(reportsDir, "value-flow-report.csv"));
   assert.ok(rows.some((row) => row.scope === "paper" && row.key === "total" && row.value === "2"));
   assert.ok(rows.some((row) => row.scope === "paper.bookmaker" && row.key === "Novibet" && row.value === "1"));
+  assert.ok(rows.some((row) => row.scope === "paper.market" && row.key === "TOTALS" && row.value === "1"));
   assert.ok(rows.some((row) => row.scope === "audit.reason" && row.key === "UNMAPPED_SPORT_LEAGUE" && row.value === "1"));
   assert.ok(rows.some((row) => row.scope === "scan.latest" && row.key === "maxEv" && row.value === "0.0320"));
+  assert.ok(rows.some((row) => row.scope === "scan.latest.market" && row.key === "TOTALS" && row.value === "1"));
 
   const json = JSON.parse(await readFile(join(reportsDir, "value-flow-report.json"), "utf8"));
   assert.equal(json.paper.total, 2);
