@@ -1,0 +1,154 @@
+import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { runCli } from "../src/cli.mjs";
+import { readCsv } from "../src/csv.mjs";
+
+const KEY = "theodds-secret";
+
+function book(key, home, draw, away) {
+  return {
+    key,
+    title: key,
+    last_update: "2026-06-27T12:00:00Z",
+    markets: [{
+      key: "h2h",
+      last_update: "2026-06-27T12:00:00Z",
+      outcomes: [
+        { name: "Japan", price: home },
+        { name: "Sweden", price: away },
+        { name: "Draw", price: draw },
+      ],
+    }],
+  };
+}
+
+const event = {
+  id: "evt-1",
+  sport_key: "soccer_fifa_world_cup",
+  sport_title: "FIFA World Cup",
+  commence_time: "2026-06-28T18:00:00Z",
+  home_team: "Japan",
+  away_team: "Sweden",
+  bookmakers: [
+    book("pinnacle", 2.00, 3.40, 3.80),
+    book("betsson", 2.02, 3.35, 3.70),
+    book("unibet", 1.98, 3.45, 3.75),
+    book("williamhill", 2.01, 3.38, 3.72),
+    book("softbook", 2.45, 3.10, 3.10),
+  ],
+};
+
+test("theodds-sweep records cross-book paper value and controls without Odds-API.io", async () => {
+  const calls = [];
+  let out = "";
+  const reportsDir = await mkdtemp(join(tmpdir(), "theodds-sweep-"));
+
+  const code = await runCli([
+    "theodds-sweep",
+    "--sports=soccer_fifa_world_cup",
+    "--edge=5",
+    "--sample-min-ev=-5",
+    "--sample-limit=3",
+  ], {
+    out: (text) => { out += text; },
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    loadApiKey: async () => { throw new Error("Odds-API.io must not be used"); },
+    createClient: () => { throw new Error("Odds-API.io client must not be created"); },
+    createTheOddsClient: ({ apiKey }) => {
+      assert.equal(apiKey, KEY);
+      return {
+        async listSports() {
+          calls.push(["sports"]);
+          return { data: [{ key: "soccer_fifa_world_cup", active: true }] };
+        },
+        async getOdds(args) {
+          calls.push(["odds", args]);
+          return { data: [event], receivedAt: "2026-06-27T12:00:05Z", quota: { remaining: 19888, lastCost: 2 } };
+        },
+      };
+    },
+    reportsDir,
+    now: () => new Date("2026-06-27T12:00:05Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.match(out, /The Odds sweep/);
+  assert.match(out, /Recorded 1 new sweep value paper bet/);
+  assert.match(out, /Sampled 3 sweep control/);
+  assert.deepEqual(calls.find((call) => call[0] === "odds")[1], {
+    sportKey: "soccer_fifa_world_cup",
+    regions: "eu",
+    markets: "h2h,totals",
+  });
+
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows.length, 4);
+  const value = rows.find((row) => row.tier !== "CONTROL");
+  assert.equal(value.referenceEventId, "evt-1");
+  assert.equal(value.bettableEventId, "evt-1");
+  assert.equal(value.bookmaker, "softbook");
+  assert.equal(value.market, "MATCH_RESULT");
+  assert.equal(value.outcome, "1");
+  assert.equal(value.sportKey, "soccer_fifa_world_cup");
+  assert.ok(Number(value.ev) >= 0.05);
+  assert.equal(rows.filter((row) => row.tier === "CONTROL").length, 3);
+});
+
+test("theodds-sweep falls back to h2h when a sport rejects totals", async () => {
+  const calls = [];
+  const reportsDir = await mkdtemp(join(tmpdir(), "theodds-sweep-fallback-"));
+
+  const code = await runCli([
+    "theodds-sweep",
+    "--sports=soccer_fifa_world_cup",
+    "--markets=h2h,totals",
+  ], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async listSports() {
+        return { data: [{ key: "soccer_fifa_world_cup", active: true }] };
+      },
+      async getOdds(args) {
+        calls.push(args);
+        if (args.markets === "h2h,totals") throw new Error("The Odds API request failed with status 422");
+        return { data: [event], receivedAt: "2026-06-27T12:00:05Z", quota: { remaining: 19888, lastCost: 1 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-27T12:00:05Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls.map((call) => call.markets), ["h2h,totals", "h2h"]);
+});
+
+test("theodds-sweep skips sports that reject h2h too", async () => {
+  let out = "";
+  const reportsDir = await mkdtemp(join(tmpdir(), "theodds-sweep-skip-"));
+
+  const code = await runCli(["theodds-sweep", "--sports=bad_sport"], {
+    out: (text) => { out += text; },
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async listSports() {
+        return { data: [{ key: "bad_sport", active: true }] };
+      },
+      async getOdds() {
+        throw new Error("The Odds API request failed with status 422");
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-27T12:00:05Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.match(out, /skippedSports=1/);
+});

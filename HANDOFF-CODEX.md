@@ -34,6 +34,25 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (The Odds API sweep for fast research volume).**
+> Corrected the coverage strategy after re-reading the documented limitations:
+> Odds-API.io remains limited to the selected Stoiximan/Novibet account scope,
+> so fast research volume now comes from The Odds API directly. Added
+> `node src/cli.mjs theodds-sweep`, a paper-only cross-book market sweep that
+> queries active The Odds API sports (`h2h,totals` with per-sport fallback to
+> `h2h`), computes leave-one-book-out consensus fair probabilities, writes
+> value rows plus EV-band controls into `reports/paper-bets.csv`, and writes a
+> gitignored `reports/theodds-sweep-*.csv` audit file. It never uses
+> Odds-API.io, Telegram, scraping, or auto-betting. Live run:
+> `--edge=0.5 --sample-min-ev=-5 --sample-limit=250 --max-sports=12
+> --markets=h2h,totals --regions=eu` used **18** The Odds API credits, skipped
+> 3 unsupported sports, produced **2134** audit rows, **32** value rows and
+> **250** controls. Paper ledger is now **584** rows (`VALUE/VALUE_CHECK=110`,
+> `CONTROL=474`). Interpretation: this solves forward research volume, but these
+> rows are a cross-book research dataset, not Stoiximan/Novibet-only actionable
+> evidence. Verification: focused sweep tests passing; run full test before next
+> commit/merge.
+>
 > **Status update 2026-06-27 (live coverage widening attempt).** Added
 > `--target-bookmakers=ALL` to the measurement-only WebSocket probe and live
 > shadow runner so local training/audit filters no longer discard non

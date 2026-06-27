@@ -58,6 +58,11 @@ const SCAN_COLUMNS = [
   "ev", "status",
 ];
 const OPPORTUNITY_COLUMNS = ["ev", "tier", "match", "pick", "bookmaker", "odd", "fairOdd", "marketFair", "books", "kickoffUtc"];
+const THEODDS_SWEEP_COLUMNS = [
+  "sportKey", "eventId", "kickoffUtc", "homeTeam", "awayTeam", "bookmaker",
+  "market", "line", "outcome", "decimalOdds", "fairOdds", "fairProbability",
+  "ev", "status", "consensusBooks",
+];
 const MATCH_RESULT_PICK = { "1": "Home (1)", X: "Draw (X)", "2": "Away (2)" };
 
 const CANONICAL_COLUMNS = [
@@ -499,6 +504,197 @@ async function runScan({
     );
     out(`Skipped ${sampledMerged.duplicates} duplicate sampled observation${sampledMerged.duplicates === 1 ? "" : "s"}.\n`);
   }
+  return 0;
+}
+
+function optionValue(args, name, fallback = undefined) {
+  const hit = args.find((arg) => arg.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : fallback;
+}
+
+function numericArg(args, name, fallback) {
+  const parsed = Number(optionValue(args, name, fallback));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function splitArg(args, name) {
+  return String(optionValue(args, name, ""))
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function sweepStatus(ev) {
+  if (ev >= 0.15) return "SUSPICIOUS";
+  if (ev >= 0.05) return "VALUE_CHECK";
+  return "VALUE";
+}
+
+function sweepRow(result) {
+  return {
+    sportKey: result.sportKey,
+    eventId: result.eventId,
+    kickoffUtc: result.kickoffUtc,
+    homeTeam: result.homeTeam,
+    awayTeam: result.awayTeam,
+    bookmaker: result.bookmaker,
+    market: result.market,
+    line: result.line ?? "",
+    outcome: result.outcome,
+    decimalOdds: result.decimalOdds.toFixed(4),
+    fairOdds: result.fairOdds.toFixed(4),
+    fairProbability: result.fairProbability.toFixed(6),
+    ev: result.ev.toFixed(6),
+    status: result.status,
+    consensusBooks: String(result.consensusBooks),
+  };
+}
+
+function sweepOpportunity(result) {
+  return {
+    result,
+    fixture: {
+      referenceEventId: result.eventId,
+      bettableEventId: result.eventId,
+      sportKey: result.sportKey,
+      kickoffUtc: result.kickoffUtc,
+      homeTeam: result.homeTeam,
+      awayTeam: result.awayTeam,
+    },
+    consensus: new Map(),
+  };
+}
+
+function findTheOddsSweepRows(rows, {
+  sportKey,
+  threshold,
+  sampleMinEv,
+  minBooks,
+  candidateBookmakers,
+}) {
+  const byEvent = new Map();
+  for (const row of rows) {
+    if (!byEvent.has(row.eventId)) byEvent.set(row.eventId, []);
+    byEvent.get(row.eventId).push(row);
+  }
+
+  const values = [];
+  const controls = [];
+  const audit = [];
+  const candidateSet = candidateBookmakers.length ? new Set(candidateBookmakers) : null;
+  for (const eventRows of byEvent.values()) {
+    for (const candidate of eventRows) {
+      if (candidate.bookmaker === REFERENCE_BOOKMAKER) continue;
+      if (candidateSet && !candidateSet.has(candidate.bookmaker)) continue;
+      const referenceRows = eventRows.filter((row) => row.bookmaker !== candidate.bookmaker);
+      const consensus = consensusFairProbabilities(referenceRows);
+      const key = `${candidate.market}|${candidate.line}|${candidate.outcome}`;
+      const fair = consensus.get(key);
+      if (!fair?.fairProbability || fair.books < minBooks) continue;
+      const ev = candidate.decimalOdds * fair.fairProbability - 1;
+      const result = {
+        ...candidate,
+        sportKey,
+        fairProbability: fair.fairProbability,
+        fairOdds: 1 / fair.fairProbability,
+        ev,
+        consensusBooks: fair.books,
+        status: ev >= threshold ? sweepStatus(ev) : "NO_VALUE",
+      };
+      audit.push(result);
+      if (ev >= threshold) values.push(result);
+      else if (Number.isFinite(sampleMinEv) && ev >= sampleMinEv) {
+        controls.push({ ...result, status: "CONTROL" });
+      }
+    }
+  }
+  return { values, controls, audit };
+}
+
+async function runTheOddsSweep({
+  args,
+  loadTheOddsKey,
+  createTheOddsClient,
+  out,
+  reportsDir,
+  now,
+}) {
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  const threshold = numericArg(args, "edge", 2) / 100;
+  const sampleMinEvRaw = optionValue(args, "sample-min-ev", "");
+  const sampleMinEv = sampleMinEvRaw === "" ? null : Number(sampleMinEvRaw) / 100;
+  const sampleLimit = Math.max(0, Math.floor(numericArg(args, "sample-limit", 100)));
+  const minBooks = Math.max(2, Math.floor(numericArg(args, "min-books", 4)));
+  const maxSports = Math.max(1, Math.floor(numericArg(args, "max-sports", 12)));
+  const markets = optionValue(args, "markets", PAPER_REFERENCE_MARKETS);
+  const regions = optionValue(args, "regions", "eu");
+  const candidateBookmakers = splitArg(args, "bookmakers");
+  const explicitSports = splitArg(args, "sports");
+  const sportsResponse = await client.listSports();
+  const activeSports = (sportsResponse.data ?? []).filter((sport) => sport.active !== false);
+  const activeKeys = new Set(activeSports.map((sport) => String(sport.key)));
+  const sportKeys = (explicitSports.length ? explicitSports : activeSports.map((sport) => String(sport.key)))
+    .filter((sportKey) => activeKeys.has(sportKey))
+    .slice(0, maxSports);
+
+  const values = [];
+  const controls = [];
+  const audit = [];
+  let quotaRemaining;
+  let actualCredits = 0;
+  let skippedSports = 0;
+  for (const sportKey of sportKeys) {
+    let response;
+    try {
+      response = await client.getOdds({ sportKey, regions, markets });
+    } catch (error) {
+      if (!String(error.message).includes("status 422") || markets === "h2h") throw error;
+      try {
+        response = await client.getOdds({ sportKey, regions, markets: "h2h" });
+      } catch (fallbackError) {
+        if (!String(fallbackError.message).includes("status 422")) throw fallbackError;
+        skippedSports += 1;
+        continue;
+      }
+    }
+    quotaRemaining = response.quota?.remaining ?? quotaRemaining;
+    actualCredits += Number(response.quota?.lastCost ?? 0) || 0;
+    const rows = normalizeTheOddsResponse(response.data ?? [], response.receivedAt);
+    const result = findTheOddsSweepRows(rows, {
+      sportKey,
+      threshold,
+      sampleMinEv,
+      minBooks,
+      candidateBookmakers,
+    });
+    values.push(...result.values);
+    controls.push(...result.controls);
+    audit.push(...result.audit);
+    if (Number.isFinite(quotaRemaining) && quotaRemaining < MIN_SCAN_QUOTA) break;
+  }
+
+  values.sort((a, b) => b.ev - a.ev);
+  controls.sort((a, b) => b.ev - a.ev);
+  const sampledControls = sampleLimit ? controls.slice(0, sampleLimit) : controls;
+  const stamp = stampFrom(now);
+  await writeCsv(join(reportsDir, `theodds-sweep-${stamp}.csv`), audit.map(sweepRow), THEODDS_SWEEP_COLUMNS);
+
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  const existing = await readCsvIfPresent(ledgerPath);
+  const mergedValues = mergePaperBets(existing, values.map(sweepOpportunity), {
+    firstSeenAt: now().toISOString(),
+  });
+  const mergedControls = mergePaperBets(mergedValues.rows, sampledControls.map(sweepOpportunity), {
+    firstSeenAt: now().toISOString(),
+  });
+  await writeCsv(ledgerPath, mergedControls.rows, PAPER_COLUMNS);
+
+  out(
+    `The Odds sweep — sports=${sportKeys.length}, skippedSports=${skippedSports}, auditRows=${audit.length}, value=${values.length}, controls=${sampledControls.length}, credits=${actualCredits}.\n`,
+  );
+  out(`Recorded ${mergedValues.added} new sweep value paper bet${mergedValues.added === 1 ? "" : "s"}.\n`);
+  out(`Sampled ${mergedControls.added} sweep control${mergedControls.added === 1 ? "" : "s"}.\n`);
+  out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
   return 0;
 }
 
@@ -1379,6 +1575,16 @@ export async function runCli(argv, deps = {}) {
         loadRegistry, registryPath: sportMapPath, targetBookmakers, sampleMinEv, sampleLimit, sampleRepeat,
       });
     }
+    if (command === "theodds-sweep") {
+      return await runTheOddsSweep({
+        args: rest,
+        loadTheOddsKey,
+        createTheOddsClient,
+        out,
+        reportsDir,
+        now,
+      });
+    }
     if (command === "settle") {
       return await runSettle({
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
@@ -1494,7 +1700,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;
