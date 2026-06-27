@@ -4,12 +4,11 @@
 // +EV under the same rule as Telegram alerts: Pinnacle fair probability plus
 // 3-book consensus EV must both clear the 10% floor. It sends no alerts.
 
-import { access } from "node:fs/promises";
+import { access, appendFile, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveEnvPath } from "../src/cli.mjs";
-import { readCsv, writeCsv } from "../src/csv.mjs";
 import { loadEnvFile, requireApiKey, requireKey } from "../src/env.mjs";
 import { confirmCandidate } from "../src/mispricing_confirm.mjs";
 import { matchCandidateEvent } from "../src/mispricing_match.mjs";
@@ -611,10 +610,33 @@ async function fileExists(path) {
   return access(path).then(() => true, () => false);
 }
 
+function encodeCsvValue(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
 async function appendCsvRows(path, rows, columns) {
   if (rows.length === 0) return;
-  const existing = await fileExists(path) ? await readCsv(path) : [];
-  await writeCsv(path, [...existing, ...rows], columns);
+  await mkdir(dirname(path), { recursive: true });
+  const existing = await fileExists(path);
+  const lines = [
+    ...(existing ? [] : [columns.map(encodeCsvValue).join(",")]),
+    ...rows.map((row) => columns.map((column) => encodeCsvValue(row[column])).join(",")),
+  ];
+  await appendFile(path, `${lines.join("\r\n")}\r\n`, "utf8");
+}
+
+export function createSerializedCsvAppender(columns) {
+  let tail = Promise.resolve();
+  return async function append(path, rows) {
+    if (rows.length === 0) return;
+    const write = tail.then(
+      () => appendCsvRows(path, rows, columns),
+      () => appendCsvRows(path, rows, columns),
+    );
+    tail = write.catch(() => {});
+    return write;
+  };
 }
 
 async function dataAsText(data) {
@@ -637,6 +659,8 @@ async function runProbe(argv = process.argv.slice(2)) {
   const registry = await loadSportRegistry(DEFAULT_SPORT_MAP);
   const sportsResponse = await referenceClient.listSports();
   const state = createLifetimeState();
+  const appendStrictRows = createSerializedCsvAppender(STRICT_CSV_COLUMNS);
+  const appendAuditRows = createSerializedCsvAppender(STRICT_AUDIT_COLUMNS);
   const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
   const outputPath = resolve(option(argv, "output", join(reportsDir, "ws-lifetime-log.csv")));
   const auditOutput = liveShadowAuditPath({ argv, reportsDir });
@@ -697,8 +721,8 @@ async function runProbe(argv = process.argv.slice(2)) {
         referenceSnapshot,
         now: new Date(),
       });
-      await appendCsvRows(outputPath, rows, STRICT_CSV_COLUMNS);
-      if (auditOutputPath) await appendCsvRows(auditOutputPath, audit, STRICT_AUDIT_COLUMNS);
+      await appendStrictRows(outputPath, rows);
+      if (auditOutputPath) await appendAuditRows(auditOutputPath, audit);
       if (rows.length) console.log(`Closed ${rows.length} lifetime row(s); lastSeq=${state.lastSeq || "?"}`);
       if (auditOutputPath && audit.length) console.log(`Audited ${audit.length} strict EV candidate row(s); lastSeq=${state.lastSeq || "?"}`);
       if (state.resyncRequired) {

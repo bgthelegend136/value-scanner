@@ -46,7 +46,10 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 > Runtime task `Bet-Live-Shadow` is installed Ready, repeats every 2h, wakes the
 > computer, ignores overlapping runs, and runs for up to 3h. Smoke run connected to
 > Odds-API.io with `status=live` and `channels=odds,scores,status` with redacted key.
-> Verification: focused tests plus full `npm test` / `node --test` **222/222 passing**.
+> Follow-up review fixed the live-shadow CSV writer: audit/lifetime rows are now
+> append-only and serialized, avoiding full-file rewrites and concurrent `onmessage`
+> write races that could lose measurement rows under bursty live updates. Verification:
+> focused tests plus full `npm test` / `node --test` **223/223 passing**.
 >
 > **Status update 2026-06-27 (paper market widening + analysis design).** The
 > paper-only collection path now prices both `MATCH_RESULT` and `TOTALS` against

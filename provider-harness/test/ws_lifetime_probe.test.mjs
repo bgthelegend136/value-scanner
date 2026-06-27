@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   applyWsMessage,
   buildWsUrl,
+  createSerializedCsvAppender,
   createLifetimeState,
   evaluateStrictEvMessage,
   evaluateStrictEvMessageWithAudit,
@@ -239,6 +243,25 @@ test("live shadow audit records rejected strict-EV candidate evaluations", async
   assert.equal(home.sportKey, "soccer_fifa_world_cup");
   assert.equal(home.offeredOdds, "1.9000");
   assert.doesNotMatch(JSON.stringify(home), /secret|apiKey/i);
+});
+
+test("serialized CSV appender preserves concurrent websocket audit writes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ws-audit-"));
+  const output = join(dir, "audit.csv");
+  const append = createSerializedCsvAppender(["seq", "status"]);
+
+  await Promise.all(Array.from({ length: 20 }, (_, index) =>
+    append(output, [{ seq: String(index), status: "REJECTED" }]),
+  ));
+
+  const lines = (await readFile(output, "utf8")).trim().split(/\r?\n/u);
+  assert.equal(lines[0], "seq,status");
+  assert.equal(lines.filter((line) => line === "seq,status").length, 1);
+  assert.equal(lines.length, 21);
+  assert.deepEqual(
+    new Set(lines.slice(1).map((line) => line.split(",")[0])),
+    new Set(Array.from({ length: 20 }, (_, index) => String(index))),
+  );
 });
 
 test("strict EV ws probe closes confirmed lifetimes when markets disappear", async () => {
