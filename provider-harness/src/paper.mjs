@@ -306,6 +306,92 @@ function optionalFinite(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const VALUE_TIERS = new Set(["VALUE", "VALUE_CHECK", "SUSPICIOUS"]);
+const RESEARCH_STATUS_MARKETS = ["MATCH_RESULT", "TOTALS", "DRAW_NO_BET", "BTTS", "DOUBLE_CHANCE"];
+
+function isValueTier(row) {
+  return VALUE_TIERS.has(String(row.tier ?? ""));
+}
+
+function hasCapturedClv(row) {
+  return optionalFinite(row.clv) !== null;
+}
+
+function emptyResearchBucket(scope, key) {
+  return {
+    scope,
+    key,
+    rows: 0,
+    uniqueSelections: new Set(),
+    valueRows: 0,
+    valueClvCaptured: 0,
+    valuePending: 0,
+    controlRows: 0,
+    controlClvCaptured: 0,
+  };
+}
+
+function addResearchBucket(buckets, scope, key, row) {
+  const safeKey = String(key ?? "").trim() || "(blank)";
+  const id = `${scope}|${safeKey}`;
+  if (!buckets.has(id)) buckets.set(id, emptyResearchBucket(scope, safeKey));
+  const bucket = buckets.get(id);
+  bucket.rows += 1;
+  bucket.uniqueSelections.add(paperBetKey(row));
+  if (isValueTier(row)) {
+    bucket.valueRows += 1;
+    if (hasCapturedClv(row)) bucket.valueClvCaptured += 1;
+    else if (row.status === "PENDING") bucket.valuePending += 1;
+  } else if (row.tier === "CONTROL") {
+    bucket.controlRows += 1;
+    if (hasCapturedClv(row)) bucket.controlClvCaptured += 1;
+  }
+}
+
+function ensureResearchBucket(buckets, scope, key) {
+  const safeKey = String(key ?? "").trim() || "(blank)";
+  const id = `${scope}|${safeKey}`;
+  if (!buckets.has(id)) buckets.set(id, emptyResearchBucket(scope, safeKey));
+}
+
+function finishResearchBucket(bucket) {
+  return {
+    scope: bucket.scope,
+    key: bucket.key,
+    rows: bucket.rows,
+    uniqueSelectionCount: bucket.uniqueSelections.size,
+    valueRows: bucket.valueRows,
+    valueClvCaptured: bucket.valueClvCaptured,
+    valuePending: bucket.valuePending,
+    controlRows: bucket.controlRows,
+    controlClvCaptured: bucket.controlClvCaptured,
+    missingValueClvTo200: Math.max(0, 200 - bucket.valueClvCaptured),
+    missingValueClvTo300: Math.max(0, 300 - bucket.valueClvCaptured),
+  };
+}
+
+export function summarizeResearchStatus(rows) {
+  const buckets = new Map();
+  ensureResearchBucket(buckets, "overall", "all");
+  ensureResearchBucket(buckets, "main", "MATCH_RESULT");
+  for (const market of RESEARCH_STATUS_MARKETS) {
+    ensureResearchBucket(buckets, "market", market);
+  }
+  for (const row of rows) {
+    addResearchBucket(buckets, "overall", "all", row);
+    if (row.market === "MATCH_RESULT") addResearchBucket(buckets, "main", "MATCH_RESULT", row);
+    addResearchBucket(buckets, "market", row.market, row);
+  }
+  const scopeOrder = new Map([["overall", 0], ["main", 1], ["market", 2]]);
+  return [...buckets.values()]
+    .map(finishResearchBucket)
+    .sort((left, right) =>
+      scopeOrder.get(left.scope) - scopeOrder.get(right.scope) ||
+      right.valueClvCaptured - left.valueClvCaptured ||
+      left.key.localeCompare(right.key),
+    );
+}
+
 function clvCalibrationSample(rows) {
   const samples = [];
   for (const row of rows) {
@@ -357,6 +443,7 @@ function emptyCalibrationBucket(scope, key) {
     evTotal: 0,
     clvTotal: 0,
     clvValues: [],
+    uniqueSelections: new Set(),
   };
 }
 
@@ -369,6 +456,7 @@ function addCalibrationBucket(buckets, scope, key, sample) {
   bucket.evTotal += sample.ev;
   bucket.clvTotal += sample.clv;
   bucket.clvValues.push(sample.clv);
+  bucket.uniqueSelections.add(paperBetKey(sample.row));
   if (sample.clv > 0) bucket.positive += 1;
 }
 
@@ -379,12 +467,14 @@ function finishCalibrationBucket(bucket) {
     scope: bucket.scope,
     key: bucket.key,
     count: bucket.count,
+    uniqueSelectionCount: bucket.uniqueSelections.size,
     positive: bucket.positive,
     positiveClvRate: bucket.count > 0 ? bucket.positive / bucket.count : null,
     averageEv,
     averageClv,
     medianClv: median(bucket.clvValues),
     clvMinusEv: averageClv === null || averageEv === null ? null : averageClv - averageEv,
+    sampleWarning: bucket.scope === "market" && bucket.count < 50 ? "LOW_SAMPLE_N_LT_50" : "",
   };
 }
 
@@ -419,6 +509,7 @@ export function summarizeClvCalibration(rows) {
   for (const sample of samples) {
     const { row } = sample;
     addCalibrationBucket(buckets, "overall", "all", sample);
+    if (row.market === "MATCH_RESULT") addCalibrationBucket(buckets, "main", "MATCH_RESULT", sample);
     addCalibrationBucket(buckets, "evBucket", evCalibrationBucket(sample.ev), sample);
     addCalibrationBucket(buckets, "tier", row.tier, sample);
     addCalibrationBucket(buckets, "sportKey", paperSportKey(row), sample);
@@ -429,12 +520,13 @@ export function summarizeClvCalibration(rows) {
 
   const scopeOrder = new Map([
     ["overall", 0],
-    ["evBucket", 1],
-    ["tier", 2],
-    ["sportKey", 3],
-    ["market", 4],
-    ["bookmaker", 5],
-    ["oddsBucket", 6],
+    ["main", 1],
+    ["evBucket", 2],
+    ["tier", 3],
+    ["sportKey", 4],
+    ["market", 5],
+    ["bookmaker", 6],
+    ["oddsBucket", 7],
   ]);
   const evBucketOrder = new Map([
     ["<-5%", 0],
@@ -466,6 +558,7 @@ export function summarizeClvCalibration(rows) {
   return {
     sampleSize: samples.length,
     regression: clvEvRegression(rows),
+    mainScore: rowsOut.find((row) => row.scope === "main" && row.key === "MATCH_RESULT") ?? null,
     rows: rowsOut,
   };
 }

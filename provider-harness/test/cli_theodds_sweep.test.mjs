@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -216,6 +216,72 @@ test("theodds-sweep soccer-core uses event odds for soccer-only research markets
   assert.ok(rows.some((row) => row.market === "DRAW_NO_BET" && row.tier !== "CONTROL"));
   assert.ok(rows.some((row) => row.market === "BTTS" && row.tier !== "CONTROL"));
   assert.equal(rows.some((row) => row.market === "TOTALS"), false);
+});
+
+test("theodds-sweep soccer-core writes pre-filter coverage diagnostics", async () => {
+  const calls = [];
+  const reportsDir = await mkdtemp(join(tmpdir(), "theodds-sweep-coverage-"));
+  const coverageEvent = {
+    ...soccerEvent,
+    id: "coverage-1",
+    bookmakers: [
+      book("pinnacle", 2.00, 3.40, 3.80),
+      book("betsson", 2.02, 3.35, 3.70),
+      book("unibet", 1.98, 3.45, 3.75),
+      book("williamhill", 2.01, 3.38, 3.72),
+      book("softbook", 2.03, 3.30, 3.60),
+      {
+        key: "pinnacle",
+        title: "pinnacle",
+        markets: [{ key: "draw_no_bet", outcomes: [{ name: "Japan", price: 1.70 }, { name: "Sweden", price: 2.10 }] }],
+      },
+      {
+        key: "softbook",
+        title: "softbook",
+        markets: [{ key: "draw_no_bet", outcomes: [{ name: "Japan", price: 1.72 }, { name: "Sweden", price: 2.05 }] }],
+      },
+    ],
+  };
+
+  const code = await runCli([
+    "theodds-sweep",
+    "--market-profile=soccer-core",
+    "--edge=50",
+    "--sample-min-ev=-5",
+    "--sample-limit=0",
+    "--event-limit=1",
+  ], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async listSports() {
+        return { data: [{ key: "soccer_fifa_world_cup", active: true }] };
+      },
+      async listEvents() {
+        return { data: [{ ...soccerEvent, id: "coverage-1" }], quota: { remaining: 19888, lastCost: 0 } };
+      },
+      async getEventOdds(args) {
+        calls.push(args);
+        return { data: coverageEvent, receivedAt: "2026-06-27T12:00:05Z", quota: { remaining: 19884, lastCost: 4 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-27T12:00:05Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.doesNotMatch(calls[0].markets, /spreads|team_totals|alternate|player/u);
+
+  const coverageFile = (await readdir(reportsDir)).find((name) => name.startsWith("theodds-sweep-coverage-"));
+  assert.ok(coverageFile);
+  const coverage = await readCsv(join(reportsDir, coverageFile));
+  const byMarket = new Map(coverage.map((row) => [row.market, row]));
+  assert.equal(byMarket.get("MATCH_RESULT").reason, "NO_VALUE");
+  assert.equal(byMarket.get("MATCH_RESULT").normalizedRows, "15");
+  assert.equal(byMarket.get("DRAW_NO_BET").reason, "TOO_FEW_BOOKS");
+  assert.equal(byMarket.get("BTTS").reason, "NO_MARKET");
+  assert.equal(byMarket.get("DOUBLE_CHANCE").reason, "NO_MARKET");
 });
 
 test("theodds-sweep falls back to h2h when a sport rejects totals", async () => {

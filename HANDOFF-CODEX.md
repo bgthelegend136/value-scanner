@@ -34,6 +34,23 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-28 (balanced VALUE CLV acceleration reports).**
+> Implemented the balanced acceleration reporting layer. New offline command:
+> `node src/cli.mjs research-status`, which writes
+> `reports/research-status.csv` and `.json`, counting VALUE CLV captured,
+> VALUE pending without CLV, CONTROL CLV captured, unique selection counts, and
+> gaps to 200/300 VALUE CLV. It always prints explicit buckets for
+> `MATCH_RESULT`, `TOTALS`, `DRAW_NO_BET`, `BTTS`, and `DOUBLE_CHANCE`; main
+> score remains `MATCH_RESULT` only. `clv-calibrate` now adds
+> `uniqueSelectionCount`, `mainScore`, a `main:MATCH_RESULT` row excluding
+> `TOTALS`, and low-sample warnings for market buckets with `n < 50`.
+> Soccer-core sweeps now write `theodds-sweep-coverage-*.csv` with pre-filter
+> coverage reasons (`NO_MARKET`, `TOO_FEW_BOOKS`, `NO_VALUE`, `HAS_VALUE`)
+> without relaxing `min-books` or adding US-style markets. Current read-only
+> status: **86** VALUE CLV captured overall, **83** in main `MATCH_RESULT`,
+> **38** VALUE pending without CLV, **311** CONTROL CLV captured; missing
+> **114** to 200 and **214** to 300. Verification: `npm test` **247/247**.
+>
 > **Status update 2026-06-28 (soccer-only market expansion).**
 > Added a research-only soccer market profile for `theodds-sweep`:
 > `--market-profile=soccer-core`. It uses The Odds API Event Odds endpoint for

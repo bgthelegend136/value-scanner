@@ -433,3 +433,72 @@ test("clv-calibrate writes EV bucket and segment diagnostics without spending AP
   assert.ok(json.regression.rSquared > 0.8);
   assert.ok(json.rows.length >= 10);
 });
+
+test("clv-calibrate adds main score, unique selection counts, and low-sample market warnings", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-calibrate-main-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({
+      referenceEventId: "main-1",
+      bookmaker: "softbook",
+      market: "MATCH_RESULT",
+      outcome: "1",
+      ev: "0.030000",
+      clv: "0.040000",
+      clvCapturedAt: "2026-06-27T12:00:00.000Z",
+    }),
+    paperRow({
+      referenceEventId: "main-1",
+      bookmaker: "softbook",
+      market: "MATCH_RESULT",
+      outcome: "1",
+      ev: "0.030000",
+      clv: "0.040000",
+      clvCapturedAt: "2026-06-27T12:01:00.000Z",
+    }),
+    paperRow({
+      referenceEventId: "totals-1",
+      market: "TOTALS",
+      line: "2.5",
+      outcome: "OVER",
+      ev: "0.020000",
+      clv: "-0.100000",
+      clvCapturedAt: "2026-06-27T12:02:00.000Z",
+    }),
+    paperRow({
+      referenceEventId: "btts-1",
+      market: "BTTS",
+      outcome: "YES",
+      ev: "0.010000",
+      clv: "0.020000",
+      clvCapturedAt: "2026-06-27T12:03:00.000Z",
+    }),
+  ], PAPER_COLUMNS);
+
+  let out = "";
+  const code = await runCli(["clv-calibrate"], {
+    out: (text) => { out += text; },
+    err: () => {},
+    reportsDir,
+    now: () => new Date("2026-06-28T13:00:00.000Z"),
+    loadTheOddsKey: async () => { throw new Error("must not load key"); },
+    createTheOddsClient: () => { throw new Error("must not create client"); },
+  });
+
+  assert.equal(code, 0);
+  assert.match(out, /Main MATCH_RESULT CLV: \+4\.00%/);
+
+  const csv = await readCsv(join(reportsDir, "clv-calibration.csv"));
+  const byKey = new Map(csv.map((row) => [`${row.scope}:${row.key}`, row]));
+  assert.equal(byKey.get("overall:all").count, "4");
+  assert.equal(byKey.get("overall:all").uniqueSelectionCount, "3");
+  assert.equal(byKey.get("main:MATCH_RESULT").count, "2");
+  assert.equal(byKey.get("main:MATCH_RESULT").uniqueSelectionCount, "1");
+  assert.equal(byKey.get("main:MATCH_RESULT").averageClv, "0.0400");
+  assert.equal(byKey.get("market:TOTALS").sampleWarning, "LOW_SAMPLE_N_LT_50");
+  assert.equal(byKey.get("market:BTTS").sampleWarning, "LOW_SAMPLE_N_LT_50");
+
+  const json = JSON.parse(await readFile(join(reportsDir, "clv-calibration.json"), "utf8"));
+  assert.equal(json.mainScore.scope, "main");
+  assert.equal(json.mainScore.key, "MATCH_RESULT");
+  assert.equal(json.mainScore.averageClv, "0.0400");
+});

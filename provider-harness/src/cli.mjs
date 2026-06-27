@@ -26,6 +26,7 @@ import {
   summarizeClvCalibration,
   summarizeClvTrend,
   summarizePaperBets,
+  summarizeResearchStatus,
 } from "./paper.mjs";
 import { createValueBetsClient } from "./value_bets_client.mjs";
 import { createTelegramClient } from "./telegram.mjs";
@@ -65,6 +66,12 @@ const THEODDS_SWEEP_COLUMNS = [
   "market", "line", "outcome", "decimalOdds", "fairOdds", "fairProbability",
   "ev", "status", "consensusBooks",
 ];
+const THEODDS_SWEEP_COVERAGE_COLUMNS = [
+  "sportKey", "eventId", "market", "normalizedRows", "candidateRows",
+  "pricedCandidates", "valueCandidates", "controlCandidates",
+  "noValueCandidates", "tooFewBooksCandidates", "reason",
+];
+const SOCCER_CORE_COVERAGE_MARKETS = ["MATCH_RESULT", "DRAW_NO_BET", "BTTS", "DOUBLE_CHANCE"];
 const MATCH_RESULT_PICK = { "1": "Home (1)", X: "Draw (X)", "2": "Away (2)" };
 
 const CANONICAL_COLUMNS = [
@@ -617,6 +624,74 @@ function findTheOddsSweepRows(rows, {
   return { values, controls, audit };
 }
 
+function summarizeSweepCoverage(rows, {
+  sportKey,
+  threshold,
+  sampleMinEv,
+  minBooks,
+  candidateBookmakers,
+  expectedMarkets = SOCCER_CORE_COVERAGE_MARKETS,
+}) {
+  const byEvent = new Map();
+  for (const row of rows) {
+    if (!byEvent.has(row.eventId)) byEvent.set(row.eventId, []);
+    byEvent.get(row.eventId).push(row);
+  }
+
+  const coverage = [];
+  const candidateSet = candidateBookmakers.length ? new Set(candidateBookmakers) : null;
+  for (const [eventId, eventRows] of byEvent) {
+    for (const market of expectedMarkets) {
+      const marketRows = eventRows.filter((row) => row.market === market);
+      const candidates = marketRows.filter((row) =>
+        row.bookmaker !== REFERENCE_BOOKMAKER &&
+        (!candidateSet || candidateSet.has(row.bookmaker)),
+      );
+      let pricedCandidates = 0;
+      let valueCandidates = 0;
+      let controlCandidates = 0;
+      let noValueCandidates = 0;
+      let tooFewBooksCandidates = 0;
+
+      for (const candidate of candidates) {
+        const referenceRows = eventRows.filter((row) => row.bookmaker !== candidate.bookmaker);
+        const consensus = consensusFairProbabilities(referenceRows);
+        const key = `${candidate.market}|${candidate.line}|${candidate.outcome}`;
+        const fair = consensus.get(key);
+        if (!fair?.fairProbability || fair.books < minBooks) {
+          tooFewBooksCandidates += 1;
+          continue;
+        }
+        pricedCandidates += 1;
+        const ev = candidate.decimalOdds * fair.fairProbability - 1;
+        if (ev >= threshold) valueCandidates += 1;
+        else if (Number.isFinite(sampleMinEv) && ev >= sampleMinEv) controlCandidates += 1;
+        else noValueCandidates += 1;
+      }
+
+      let reason = "HAS_VALUE";
+      if (marketRows.length === 0) reason = "NO_MARKET";
+      else if (pricedCandidates === 0) reason = "TOO_FEW_BOOKS";
+      else if (valueCandidates === 0) reason = "NO_VALUE";
+
+      coverage.push({
+        sportKey,
+        eventId,
+        market,
+        normalizedRows: String(marketRows.length),
+        candidateRows: String(candidates.length),
+        pricedCandidates: String(pricedCandidates),
+        valueCandidates: String(valueCandidates),
+        controlCandidates: String(controlCandidates),
+        noValueCandidates: String(noValueCandidates),
+        tooFewBooksCandidates: String(tooFewBooksCandidates),
+        reason,
+      });
+    }
+  }
+  return coverage;
+}
+
 async function runTheOddsSweep({
   args,
   loadTheOddsKey,
@@ -651,6 +726,7 @@ async function runTheOddsSweep({
   const values = [];
   const controls = [];
   const audit = [];
+  const coverage = [];
   let quotaRemaining;
   let actualCredits = 0;
   let skippedSports = 0;
@@ -673,6 +749,13 @@ async function runTheOddsSweep({
         quotaRemaining = response.quota?.remaining ?? quotaRemaining;
         actualCredits += Number(response.quota?.lastCost ?? 0) || 0;
         const rows = normalizeTheOddsPayload(response.data ?? [], response.receivedAt);
+        coverage.push(...summarizeSweepCoverage(rows, {
+          sportKey,
+          threshold,
+          sampleMinEv,
+          minBooks,
+          candidateBookmakers,
+        }));
         const result = findTheOddsSweepRows(rows, {
           sportKey,
           threshold,
@@ -723,6 +806,13 @@ async function runTheOddsSweep({
   const sampledControls = sampleLimit ? controls.slice(0, sampleLimit) : controls;
   const stamp = stampFrom(now);
   await writeCsv(join(reportsDir, `theodds-sweep-${stamp}.csv`), audit.map(sweepRow), THEODDS_SWEEP_COLUMNS);
+  if (soccerCore) {
+    await writeCsv(
+      join(reportsDir, `theodds-sweep-coverage-${stamp}.csv`),
+      coverage,
+      THEODDS_SWEEP_COVERAGE_COLUMNS,
+    );
+  }
 
   const ledgerPath = join(reportsDir, "paper-bets.csv");
   const existing = await readCsvIfPresent(ledgerPath);
@@ -977,8 +1067,14 @@ const CLV_REPORT_COLUMNS = [
 ];
 
 const CLV_CALIBRATION_COLUMNS = [
-  "scope", "key", "count", "positive", "positiveClvRate",
-  "averageEv", "averageClv", "medianClv", "clvMinusEv",
+  "scope", "key", "count", "uniqueSelectionCount", "positive", "positiveClvRate",
+  "averageEv", "averageClv", "medianClv", "clvMinusEv", "sampleWarning",
+];
+
+const RESEARCH_STATUS_COLUMNS = [
+  "scope", "key", "rows", "uniqueSelectionCount", "valueRows",
+  "valueClvCaptured", "valuePending", "controlRows", "controlClvCaptured",
+  "missingValueClvTo200", "missingValueClvTo300",
 ];
 
 function clvReportRow(row) {
@@ -1036,12 +1132,14 @@ function clvCalibrationRow(row) {
     scope: row.scope,
     key: row.key,
     count: String(row.count),
+    uniqueSelectionCount: String(row.uniqueSelectionCount),
     positive: String(row.positive),
     positiveClvRate: decimalOrBlank(row.positiveClvRate),
     averageEv: decimalOrBlank(row.averageEv),
     averageClv: decimalOrBlank(row.averageClv),
     medianClv: decimalOrBlank(row.medianClv),
     clvMinusEv: decimalOrBlank(row.clvMinusEv),
+    sampleWarning: row.sampleWarning ?? "",
   };
 }
 
@@ -1060,6 +1158,7 @@ async function runClvCalibrate({ out, reportsDir, now }) {
     generatedAt,
     sampleSize: report.sampleSize,
     regression: report.regression,
+    mainScore: report.mainScore ? clvCalibrationRow(report.mainScore) : null,
     rows: csvRows,
   };
 
@@ -1076,13 +1175,71 @@ async function runClvCalibrate({ out, reportsDir, now }) {
     : `${signed(overall.averageClv * 100, 2)}%`;
   const slope = report.regression.slope === null ? "N/A" : signed(report.regression.slope, 4);
   const rSquared = report.regression.rSquared === null ? "N/A" : report.regression.rSquared.toFixed(4);
+  const mainClv = report.mainScore?.averageClv === null || report.mainScore?.averageClv === undefined
+    ? "N/A"
+    : `${signed(report.mainScore.averageClv * 100, 2)}%`;
   out(
     [
       `CLV calibration: ${report.sampleSize} captured rows`,
       `Average CLV: ${averageClv}`,
+      `Main MATCH_RESULT CLV: ${mainClv}`,
       `Regression slope: ${slope}`,
       `Regression R^2: ${rSquared}`,
       `Wrote ${csvRows.length} diagnostics rows to ${join(reportsDir, "clv-calibration.csv")}`,
+    ].join("\n") + "\n",
+  );
+  return 0;
+}
+
+function researchStatusRow(row) {
+  return {
+    scope: row.scope,
+    key: row.key,
+    rows: String(row.rows),
+    uniqueSelectionCount: String(row.uniqueSelectionCount),
+    valueRows: String(row.valueRows),
+    valueClvCaptured: String(row.valueClvCaptured),
+    valuePending: String(row.valuePending),
+    controlRows: String(row.controlRows),
+    controlClvCaptured: String(row.controlClvCaptured),
+    missingValueClvTo200: String(row.missingValueClvTo200),
+    missingValueClvTo300: String(row.missingValueClvTo300),
+  };
+}
+
+async function runResearchStatus({ out, reportsDir, now }) {
+  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  if (!await defaultFileExists(ledgerPath)) {
+    out("No paper-bet ledger found. Run scan first.\n");
+    return 0;
+  }
+
+  const rows = await readCsv(ledgerPath);
+  const reportRows = summarizeResearchStatus(rows);
+  const csvRows = reportRows.map(researchStatusRow);
+  const generatedAt = now().toISOString();
+  await writeCsv(join(reportsDir, "research-status.csv"), csvRows, RESEARCH_STATUS_COLUMNS);
+  await writeFile(
+    join(reportsDir, "research-status.json"),
+    `${JSON.stringify({
+      generatedAt,
+      targets: { valueClvCaptured: { target200: 200, target300: 300 } },
+      rows: csvRows,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const overall = reportRows.find((row) => row.scope === "overall" && row.key === "all");
+  const main = reportRows.find((row) => row.scope === "main" && row.key === "MATCH_RESULT");
+  out(
+    [
+      `Research status: ${overall?.valueClvCaptured ?? 0} VALUE CLV captured`,
+      `Main MATCH_RESULT VALUE CLV: ${main?.valueClvCaptured ?? 0}`,
+      `VALUE pending without CLV: ${overall?.valuePending ?? 0}`,
+      `CONTROL CLV captured: ${overall?.controlClvCaptured ?? 0}`,
+      `Missing to 200: ${overall?.missingValueClvTo200 ?? 200}`,
+      `Missing to 300: ${overall?.missingValueClvTo300 ?? 300}`,
+      `Wrote ${csvRows.length} research status rows to ${join(reportsDir, "research-status.csv")}`,
     ].join("\n") + "\n",
   );
   return 0;
@@ -1753,6 +1910,9 @@ export async function runCli(argv, deps = {}) {
     if (command === "clv-calibrate") {
       return await runClvCalibrate({ out, reportsDir, now });
     }
+    if (command === "research-status") {
+      return await runResearchStatus({ out, reportsDir, now });
+    }
     if (command === "value-flow-report") {
       return await runValueFlowReport({ out, reportsDir, now });
     }
@@ -1841,7 +2001,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;
