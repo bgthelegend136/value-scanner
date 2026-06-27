@@ -34,6 +34,17 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-28 (16% Codex window operational runbook).**
+> Added `docs/superpowers/runbooks/2026-06-28-value-clv-collection-runbook.md`
+> as the short-window operating plan. The correct next action is disciplined
+> collection, not a new feature: repeat capped `h2h` sweeps, run CLV capture
+> often with `--window-minutes=40`, use soccer-core only as capped coverage
+> research, and monitor `clv-calibrate` plus `research-status`. Baseline remains:
+> **86** VALUE CLV captured overall, **83** main `MATCH_RESULT`, **38** VALUE
+> pending without CLV, **311** CONTROL CLV captured, missing **114** to 200 and
+> **214** to 300. Do not change Telegram thresholds, live betting rules, stake
+> sizing, or production alert scope before at least 200 VALUE CLV.
+>
 > **Status update 2026-06-28 (balanced VALUE CLV acceleration reports).**
 > Implemented the balanced acceleration reporting layer. New offline command:
 > `node src/cli.mjs research-status`, which writes
