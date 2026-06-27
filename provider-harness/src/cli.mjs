@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, writeFile } from "node:fs/promises";
+import { access, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -325,7 +325,7 @@ function opportunityRow(result, fixture, consensus) {
 // Every returned opportunity/pair carries the league's sportKey so paper bets,
 // CLV capture, and settlement can later query the right reference sport.
 async function scanLeague({
-  oddsClient, theOddsClient, sport, leagueSlug, sportKey, threshold,
+  oddsClient, theOddsClient, sport, leagueSlug, sportKey, threshold, targetBookmakers,
 }) {
   const referenceEventsRaw = await theOddsClient.listEvents({ sportKey });
   const referenceFixtures = toFixtureList(referenceEventsRaw.data ?? [], (e) => ({
@@ -359,12 +359,12 @@ async function scanLeague({
   for (const group of chunk(usablePairs, 10)) {
     const response = await oddsClient.getOddsMulti({
       eventIds: group.map((pair) => String(pair.bettableEventId)),
-      bookmakers: TARGET_BOOKMAKERS,
+      bookmakers: targetBookmakers,
     });
     for (const event of Array.isArray(response.data) ? response.data : []) {
       const rows = normalizeOddsResponse(event, response.receivedAt).filter(
         (row) =>
-          TARGET_BOOKMAKERS.includes(row.bookmaker) &&
+          targetBookmakers.includes(row.bookmaker) &&
           (row.market === "MATCH_RESULT" || row.market === "TOTALS"),
       );
       bettableByEvent.set(String(event.id), rows);
@@ -398,6 +398,7 @@ async function scanLeague({
 async function runScan({
   loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
   loadRegistry = loadSportRegistry, registryPath = DEFAULT_SPORT_MAP,
+  targetBookmakers = TARGET_BOOKMAKERS,
 }) {
   const oddsClient = createClient({ apiKey: await loadApiKey() });
   const theOddsClient = createTheOddsClient({ apiKey: await loadTheOddsKey() });
@@ -421,7 +422,7 @@ async function runScan({
   let matchedFixtures = 0;
   let quotaRemaining;
   for (const league of leagues) {
-    const result = await scanLeague({ oddsClient, theOddsClient, ...league, threshold });
+    const result = await scanLeague({ oddsClient, theOddsClient, ...league, threshold, targetBookmakers });
     opportunities.push(...result.opportunities);
     allRows.push(...result.allRows);
     matchedFixtures += result.matchedFixtures;
@@ -460,6 +461,14 @@ async function runScan({
 
 function signed(value, digits = 4) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+function parseBookmakers(value) {
+  const parsed = String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return [...new Set(parsed)];
 }
 
 function printPaperSummary(out, rows) {
@@ -595,11 +604,21 @@ async function runClv({ loadTheOddsKey, createTheOddsClient, out, reportsDir, no
     return 0;
   }
 
+  const nowMs = now().getTime();
+  const dueRows = rows.filter((row) =>
+    row.status === "PENDING" &&
+    !row.clvCapturedAt &&
+    new Date(row.kickoffUtc).getTime() <= nowMs + CLV_CAPTURE_WINDOW_MS);
+  if (dueRows.length === 0) {
+    out("No paper bets are inside the CLV capture window.\n");
+    return 0;
+  }
+
   const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
   // Pending bets can now span many leagues, so query each pending sport's
   // closing line and merge them (event ids are unique across sports).
   const pendingSportKeys = new Set(
-    rows.filter((row) => row.status === "PENDING").map(paperSportKey),
+    dueRows.map(paperSportKey),
   );
   const closing = new Map();
   let quotaRemaining;
@@ -675,6 +694,100 @@ async function runClvReport({ out, reportsDir, now }) {
       `Wrote ${csvRows.length} summary rows to ${join(reportsDir, "clv-report.csv")}`,
     ].join("\n") + "\n",
   );
+  return 0;
+}
+
+const VALUE_FLOW_COLUMNS = ["scope", "key", "value"];
+
+function increment(map, key) {
+  map.set(key, (map.get(key) ?? 0) + 1);
+}
+
+function countBy(rows, keyFn) {
+  const counts = new Map();
+  for (const row of rows) {
+    const key = String(keyFn(row) ?? "").trim();
+    increment(counts, key || "(blank)");
+  }
+  return counts;
+}
+
+function addCountRows(rows, scope, counts) {
+  const sorted = [...counts].sort((left, right) =>
+    right[1] - left[1] || left[0].localeCompare(right[0]),
+  );
+  for (const [key, value] of sorted) rows.push({ scope, key, value: String(value) });
+}
+
+async function latestScanAllPath(reportsDir) {
+  const files = await readdir(reportsDir).catch(() => []);
+  const latest = files
+    .filter((name) => /^scan-all-.+\.csv$/u.test(name))
+    .sort()
+    .at(-1);
+  return latest ? join(reportsDir, latest) : "";
+}
+
+function maxEv(rows) {
+  const values = rows.map((row) => Number(row.ev)).filter(Number.isFinite);
+  return values.length === 0 ? "" : Math.max(...values).toFixed(4);
+}
+
+async function runValueFlowReport({ out, reportsDir, now }) {
+  const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
+  const auditRows = await readCsvIfPresent(join(reportsDir, "mispricing-audit.csv"));
+  const scanPath = await latestScanAllPath(reportsDir);
+  const latestScanRows = scanPath ? await readCsv(scanPath) : [];
+  const paperSummary = summarizePaperBets(paperRows);
+  const clvSummary = summarizeClv(paperRows);
+
+  const reportRows = [
+    { scope: "paper", key: "total", value: String(paperSummary.total) },
+    { scope: "paper", key: "pending", value: String(paperSummary.pending) },
+    { scope: "paper", key: "settled", value: String(paperSummary.settled) },
+    { scope: "paper", key: "clvCaptured", value: String(clvSummary.captured) },
+    { scope: "paper", key: "clvPositive", value: String(clvSummary.positive) },
+    { scope: "paper", key: "averageClv", value: clvSummary.averageClv === null ? "" : clvSummary.averageClv.toFixed(4) },
+    { scope: "audit", key: "total", value: String(auditRows.length) },
+    { scope: "scan.latest", key: "rows", value: String(latestScanRows.length) },
+    { scope: "scan.latest", key: "maxEv", value: maxEv(latestScanRows) },
+  ];
+  addCountRows(reportRows, "paper.bookmaker", countBy(paperRows, (row) => row.bookmaker));
+  addCountRows(reportRows, "paper.sportKey", countBy(paperRows, paperSportKey));
+  addCountRows(reportRows, "audit.status", countBy(auditRows, (row) => row.status));
+  addCountRows(reportRows, "audit.reason", countBy(auditRows, (row) => row.reason));
+  addCountRows(reportRows, "scan.latest.status", countBy(latestScanRows, (row) => row.status));
+  addCountRows(reportRows, "scan.latest.bookmaker", countBy(latestScanRows, (row) => row.bookmaker));
+
+  const topRejection = [...countBy(
+    auditRows.filter((row) => String(row.reason ?? "").trim()),
+    (row) => row.reason,
+  )].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0];
+
+  const generatedAt = now().toISOString();
+  await writeCsv(join(reportsDir, "value-flow-report.csv"), reportRows, VALUE_FLOW_COLUMNS);
+  await writeFile(
+    join(reportsDir, "value-flow-report.json"),
+    `${JSON.stringify({
+      generatedAt,
+      paper: {
+        total: paperSummary.total,
+        pending: paperSummary.pending,
+        settled: paperSummary.settled,
+        clvCaptured: clvSummary.captured,
+        clvPositive: clvSummary.positive,
+        averageClv: clvSummary.averageClv,
+      },
+      audit: { total: auditRows.length },
+      latestScan: { path: scanPath, rows: latestScanRows.length, maxEv: maxEv(latestScanRows) },
+      rows: reportRows,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  out(`Value-flow report: paper=${paperRows.length}, audit=${auditRows.length}, latestScanRows=${latestScanRows.length}\n`);
+  if (topRejection) out(`Top rejection: ${topRejection[0]} (${topRejection[1]})\n`);
+  out("Wrote value-flow-report.csv and value-flow-report.json\n");
   return 0;
 }
 // Capture closing-line value for sent mispricing alerts. Reuses the same Pinnacle
@@ -1185,9 +1298,17 @@ export async function runCli(argv, deps = {}) {
       const edgeArg = rest.find((a) => a.startsWith("--edge="));
       const parsed = edgeArg ? Number(edgeArg.split("=")[1]) / 100 : 0.02;
       const threshold = Number.isFinite(parsed) ? parsed : 0.02;
+      const bookmakerArg = rest.find((a) => a.startsWith("--bookmakers="));
+      const targetBookmakers = bookmakerArg
+        ? parseBookmakers(bookmakerArg.slice("--bookmakers=".length))
+        : TARGET_BOOKMAKERS;
+      if (targetBookmakers.length === 0) {
+        err("usage: scan [--edge=N] [--bookmakers=A,B] (bookmaker list is empty)\n");
+        return 1;
+      }
       return await runScan({
         loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
-        loadRegistry, registryPath: sportMapPath,
+        loadRegistry, registryPath: sportMapPath, targetBookmakers,
       });
     }
     if (command === "settle") {
@@ -1207,6 +1328,9 @@ export async function runCli(argv, deps = {}) {
     }
     if (command === "clv-report") {
       return await runClvReport({ out, reportsDir, now });
+    }
+    if (command === "value-flow-report") {
+      return await runValueFlowReport({ out, reportsDir, now });
     }
     if (command === "mispricing-clv") {
       return await runMispricingClv({
@@ -1281,7 +1405,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] | settle | fd-settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] | settle | fd-settle | clv | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | value-flow-report | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

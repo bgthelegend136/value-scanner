@@ -214,3 +214,21 @@ test("repeated scans do not duplicate the same paper bet", async () => {
   assert.equal(rows.length, 1);
   assert.match(out, /Skipped 1 duplicate paper bet/);
 });
+
+test("scan accepts a paper-only bookmaker override", async () => {
+  const calls = [];
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-books-"));
+  const code = await runCli(["scan", "--bookmakers=Stoiximan"], {
+    out: () => {},
+    err: () => {},
+    loadApiKey: async () => ODDS_KEY,
+    loadTheOddsKey: async () => THEODDS_KEY,
+    createClient: () => fakeOddsApiClient(calls),
+    createTheOddsClient: () => fakeTheOddsClient(calls),
+    reportsDir,
+    now: () => new Date("2026-06-24T12:00:05.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.multi")[1].bookmakers, ["Stoiximan"]);
+});

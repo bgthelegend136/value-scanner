@@ -3,17 +3,16 @@ $HarnessRoot = Split-Path -Parent $PSScriptRoot
 $LogDir = Join-Path $HarnessRoot 'reports\logs'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $Stamp = Get-Date -Format 'yyyy-MM-dd'
-$LogPath = Join-Path $LogDir "paper-scan-$Stamp.log"
+$LogPath = Join-Path $LogDir "paper-clv-$Stamp.log"
 
-# Paper-only data collection: record +EV value bets across every in-season
-# league. CLV is captured by Bet-Paper-CLV near kickoff so the stored line is a
-# true near-close, not an early post-scan snapshot.
+# Paper-only CLV capture. The CLI itself skips rows outside the near-kickoff
+# capture window, so frequent runs spend zero credits when nothing is due.
 Push-Location $HarnessRoot
 try {
   Start-Transcript -Path $LogPath -Append | Out-Null
-  node src/cli.mjs scan
+  node src/cli.mjs clv
   if ($LASTEXITCODE -ne 0) {
-    throw "scan exited with code $LASTEXITCODE"
+    throw "clv exited with code $LASTEXITCODE"
   }
 } finally {
   try { Stop-Transcript | Out-Null } catch {}

@@ -34,6 +34,25 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (Codex improvement plan).** Quant diagnosis:
+> the low bet count is expected from the current narrow universe, not evidence
+> of a broken model. Live audit is dominated by `CANDIDATE_EV_BELOW_MIN`
+> rejections, while paper scanning currently prices only mapped active leagues
+> and mostly `MATCH_RESULT` markets. Improvement sequence: keep Telegram at
+> the 10% dual-confirmation floor; first fix paper CLV so it captures only near
+> kickoff; add no-quota value-flow diagnostics; then widen paper-only coverage
+> through configurable bookmakers/markets; calibrate thresholds only after a
+> larger clean CLV sample.
+> Implementation follow-up in this session: paper `clv` now spends zero quota
+> until a pending paper bet is inside the same 20-minute near-kickoff capture
+> window used by live alerts; `run-paper-scan.ps1` no longer captures CLV
+> immediately after scan; new `Bet-Paper-CLV` is registered every 15 minutes
+> from `run/install-paper-clv-task.ps1`; `value-flow-report` writes a
+> no-quota local funnel report; and `scan --bookmakers=A,B` lets paper scans
+> test alternative bookmaker sets without changing the live Telegram path.
+> Verification: PowerShell syntax OK, `node --test` 203/203 passing, no live
+> Telegram threshold change.
+>
 > **Status update 2026-06-27 (Codex Novibet switch).** The active bookmaker pair
 > was changed from Stoiximan/Superbet to **Stoiximan/Novibet** because the owner
 > switched Odds-API.io bookmaker access and a live probe returned Stoiximan 200

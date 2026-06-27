@@ -2,18 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("paper-scan runner runs scan then clv and writes a transcript log", async () => {
+test("paper-scan runner runs scan only and writes a transcript log", async () => {
   const source = await readFile(
     new URL("../scripts/run-paper-scan.ps1", import.meta.url),
     "utf8",
   );
 
   assert.match(source, /node src[\\/]cli\.mjs scan/);
-  assert.match(source, /node src[\\/]cli\.mjs clv/);
+  assert.doesNotMatch(source, /node src[\\/]cli\.mjs clv/);
   assert.match(source, /reports[\\/]logs/);
   assert.match(source, /Start-Transcript/);
   assert.match(source, /scan exited with code/);
-  assert.match(source, /clv exited with code/);
   // Paper path is Telegram-free.
   assert.doesNotMatch(source, /TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|mispricing-scan/);
 });

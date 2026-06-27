@@ -94,6 +94,31 @@ test("clv captures closing line value for pending bets", async () => {
   assert.doesNotMatch(await readFile(join(reportsDir, "paper-bets.csv"), "utf8"), new RegExp(KEY));
 });
 
+test("clv waits until kickoff is near before spending quota", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-early-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [paperRow()], PAPER_COLUMNS);
+  let calls = 0;
+  const code = await runCli(["clv"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getOdds() {
+        calls += 1;
+        return { data: closingOdds, receivedAt: "2026-06-25T12:00:00.000Z", quota: { remaining: 494 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-25T12:00:00.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.equal(calls, 0);
+  const [row] = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(row.clv, "");
+  assert.equal(row.clvCapturedAt, "");
+});
+
 test("clv queries each pending league's closing line and merges them", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "clv-multi-"));
   const brClosing = [{
