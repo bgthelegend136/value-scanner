@@ -90,6 +90,9 @@ test("forensic audit separates row volume from independent evidence", async () =
   await writeCsv(join(reportsDir, "live-event-status.csv"), [
     { observedAt: "2026-06-27T12:00:00Z", providerEventId: "live-1", eventStatus: "score", homeScore: "1", awayScore: "0" },
   ], ["observedAt", "providerEventId", "eventStatus", "homeScore", "awayScore"]);
+  await writeCsv(join(reportsDir, "ws-live-feed-stats.csv"), [
+    { observedAt: "2026-06-27T12:00:00Z", messageType: "score", bookmaker: "", markets: "", auditRows: "0", trainingRows: "0" },
+  ], ["observedAt", "messageType", "bookmaker", "markets", "auditRows", "trainingRows"]);
 
   const report = await buildAuditReport({
     reportsDir,
@@ -110,6 +113,8 @@ test("forensic audit separates row volume from independent evidence", async () =
   assert.equal(report.paper.settled, 1);
   assert.equal(report.live.statusRows, 1);
   assert.equal(report.live.trainingRows, 0);
+  assert.equal(report.live.feedStatsRows, 1);
+  assert.equal(report.live.feedStatsByType.score, 1);
   assert.equal(report.runtime.websocketProbeProcesses, 2);
   assert.ok(report.findings.some((finding) => finding.code === "ROW_VOLUME_NOT_INDEPENDENT"));
   assert.ok(report.findings.some((finding) => finding.code === "LIVE_STATUS_WITHOUT_TRAINING"));

@@ -34,6 +34,22 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (quant methodology fixes).** Fixed two audit
+> failures without changing Telegram/live-alert rules. First, the scheduled
+> paper runner no longer passes `--sample-repeat`; future `Bet-Paper-Scan`
+> runs dedupe by selection, so row count does not overstate independent betting
+> evidence. Existing repeated rows remain in `reports/paper-bets.csv` and must
+> be clustered by selection/event in analysis. Second, live shadow/training now
+> writes `reports/ws-live-feed-stats.csv` for every WebSocket message when
+> `--live-shadow` or `--live-training` is enabled. This records message type,
+> bookmaker, markets, generated audit/training/closed row counts, and rejection
+> reason counts, without secrets. `Bet-Live-Shadow` was restarted and one node
+> probe is running; the feed stats file has started with `welcome`/`score` rows,
+> while no odds/live training row has arrived yet. A zero-credit forensic audit
+> (`--max-credits=0`) confirmed the new feed stats are included without spending
+> credits. Verification: focused tests plus full `npm test` / `node --test`
+> **237/237 passing**.
+>
 > **Status update 2026-06-27 (forensic audit implemented and run).** Added a
 > read-only forensic audit command:
 > `node src/cli.mjs forensic-audit [--max-credits=N]`. It writes gitignored

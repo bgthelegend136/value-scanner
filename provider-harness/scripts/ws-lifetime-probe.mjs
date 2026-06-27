@@ -57,6 +57,10 @@ const LIVE_TRAINING_COLUMNS = [
 const LIVE_EVENT_STATUS_COLUMNS = [
   "observedAt", "providerEventId", "eventStatus", "homeScore", "awayScore",
 ];
+const LIVE_FEED_STATS_COLUMNS = [
+  "observedAt", "messageType", "seq", "providerEventId", "bookmaker",
+  "markets", "auditRows", "trainingRows", "closedRows", "rejectionReasons",
+];
 
 function option(argv, name, fallback = undefined) {
   const hit = argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -155,6 +159,14 @@ export function liveEventStatusPath({ argv, reportsDir }) {
   const explicit = option(argv, "status-output", "");
   if (explicit) return explicit;
   return hasFlag(argv, "live-training") ? join(reportsDir, "live-event-status.csv") : "";
+}
+
+export function liveFeedStatsPath({ argv, reportsDir }) {
+  const explicit = option(argv, "feed-stats-output", "");
+  if (explicit) return explicit;
+  return hasFlag(argv, "live-shadow") || hasFlag(argv, "live-training")
+    ? join(reportsDir, "ws-live-feed-stats.csv")
+    : "";
 }
 
 export function createLifetimeState() {
@@ -409,6 +421,39 @@ export function liveEventStatusRow(message) {
     eventStatus: String(message.status ?? message.type ?? ""),
     homeScore: scoreText(scores.home),
     awayScore: scoreText(scores.away),
+  };
+}
+
+function countReasons(audit) {
+  const counts = new Map();
+  for (const row of audit) {
+    const reason = String(row.reason ?? "").trim();
+    if (!reason) continue;
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join("|");
+}
+
+export function liveFeedStatsRow(message, { audit = [], training = [], closed = [], now = new Date() } = {}) {
+  if (!message) return null;
+  const markets = (message.markets ?? [])
+    .map((market) => String(market.name ?? "").trim())
+    .filter(Boolean)
+    .join("|");
+  return {
+    observedAt: isoFromTimestamp(message.timestamp, now),
+    messageType: String(message.type ?? ""),
+    seq: String(message.seq ?? ""),
+    providerEventId: message.id ? String(message.id) : "",
+    bookmaker: String(message.bookie ?? message.bookmaker ?? ""),
+    markets,
+    auditRows: String(audit.length),
+    trainingRows: String(training.length),
+    closedRows: String(closed.length),
+    rejectionReasons: countReasons(audit),
   };
 }
 
@@ -807,6 +852,7 @@ async function runProbe(argv = process.argv.slice(2)) {
   const appendAuditRows = createSerializedCsvAppender(STRICT_AUDIT_COLUMNS);
   const appendTrainingRows = createSerializedCsvAppender(LIVE_TRAINING_COLUMNS);
   const appendLiveStatusRows = createSerializedCsvAppender(LIVE_EVENT_STATUS_COLUMNS);
+  const appendFeedStatsRows = createSerializedCsvAppender(LIVE_FEED_STATS_COLUMNS);
   const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
   const outputPath = resolve(option(argv, "output", join(reportsDir, "ws-lifetime-log.csv")));
   const auditOutput = liveShadowAuditPath({ argv, reportsDir });
@@ -815,6 +861,8 @@ async function runProbe(argv = process.argv.slice(2)) {
   const trainingOutputPath = trainingOutput ? resolve(trainingOutput) : "";
   const statusOutput = liveEventStatusPath({ argv, reportsDir });
   const statusOutputPath = statusOutput ? resolve(statusOutput) : "";
+  const feedStatsOutput = liveFeedStatsPath({ argv, reportsDir });
+  const feedStatsOutputPath = feedStatsOutput ? resolve(feedStatsOutput) : "";
   const trainingMinEv = trainingOutputPath
     ? numericOption(argv, "live-training-min-ev", -5) / 100
     : null;
@@ -879,10 +927,17 @@ async function runProbe(argv = process.argv.slice(2)) {
         trainingMinEv,
         now: new Date(),
       });
+      const feedStatsRow = liveFeedStatsRow(message, {
+        audit,
+        training,
+        closed: rows,
+        now: new Date(),
+      });
       await appendStrictRows(outputPath, rows);
       if (auditOutputPath) await appendAuditRows(auditOutputPath, audit);
       if (trainingOutputPath) await appendTrainingRows(trainingOutputPath, training);
       if (statusOutputPath && statusRow) await appendLiveStatusRows(statusOutputPath, [statusRow]);
+      if (feedStatsOutputPath && feedStatsRow) await appendFeedStatsRows(feedStatsOutputPath, [feedStatsRow]);
       if (rows.length) console.log(`Closed ${rows.length} lifetime row(s); lastSeq=${state.lastSeq || "?"}`);
       if (auditOutputPath && audit.length) console.log(`Audited ${audit.length} strict EV candidate row(s); lastSeq=${state.lastSeq || "?"}`);
       if (trainingOutputPath && training.length) console.log(`Recorded ${training.length} live training observation(s); lastSeq=${state.lastSeq || "?"}`);

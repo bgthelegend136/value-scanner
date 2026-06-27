@@ -14,6 +14,8 @@ import {
   evaluateStrictEvMessageWithAudit,
   liveEventStatusPath,
   liveEventStatusRow,
+  liveFeedStatsPath,
+  liveFeedStatsRow,
   liveTrainingPath,
   liveShadowAuditPath,
   redactWsUrl,
@@ -173,6 +175,22 @@ test("live event status path follows live training and can be overridden", () =>
   assert.equal(
     liveEventStatusPath({ argv: ["--status-output=C:\\tmp\\status.csv"], reportsDir: "reports" }),
     "C:\\tmp\\status.csv",
+  );
+});
+
+test("live feed stats path is enabled for shadow or training probes", () => {
+  assert.equal(liveFeedStatsPath({ argv: [], reportsDir: "reports" }), "");
+  assert.equal(
+    liveFeedStatsPath({ argv: ["--live-shadow"], reportsDir: "reports" }),
+    "reports\\ws-live-feed-stats.csv",
+  );
+  assert.equal(
+    liveFeedStatsPath({ argv: ["--live-training"], reportsDir: "reports" }),
+    "reports\\ws-live-feed-stats.csv",
+  );
+  assert.equal(
+    liveFeedStatsPath({ argv: ["--feed-stats-output=C:\\tmp\\feed.csv"], reportsDir: "reports" }),
+    "C:\\tmp\\feed.csv",
   );
 });
 
@@ -351,6 +369,27 @@ test("live event status rows persist score/status messages for later settlement 
     homeScore: "2",
     awayScore: "1",
   });
+});
+
+test("live feed stats rows explain websocket messages without leaking secrets", () => {
+  const row = liveFeedStatsRow(wsMessage(), {
+    audit: [
+      { status: "REJECTED", reason: "PINNACLE_EV_BELOW_MIN" },
+      { status: "CONFIRMED", reason: "" },
+    ],
+    training: [{ sampleTier: "LIVE_CONTROL" }],
+    closed: [{ endReason: "PINNACLE_EV_BELOW_MIN" }],
+  });
+
+  assert.equal(row.messageType, "created");
+  assert.equal(row.providerEventId, "evt-501");
+  assert.equal(row.bookmaker, "Stoiximan");
+  assert.equal(row.markets, "ML");
+  assert.equal(row.auditRows, "2");
+  assert.equal(row.trainingRows, "1");
+  assert.equal(row.closedRows, "1");
+  assert.equal(row.rejectionReasons, "PINNACLE_EV_BELOW_MIN:1");
+  assert.doesNotMatch(JSON.stringify(row), /secret|apiKey/i);
 });
 
 test("strict EV live probe evaluates totals markets against totals reference odds", async () => {

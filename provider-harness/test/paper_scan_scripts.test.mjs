@@ -8,7 +8,8 @@ test("paper-scan runner runs scan only and writes a transcript log", async () =>
     "utf8",
   );
 
-  assert.match(source, /node src[\\/]cli\.mjs scan --edge=0 --sample-min-ev=-5 --sample-limit=250 --sample-repeat/);
+  assert.match(source, /node src[\\/]cli\.mjs scan --edge=0 --sample-min-ev=-5 --sample-limit=250\b/);
+  assert.doesNotMatch(source, /node src[\\/]cli\.mjs scan[^\r\n]*--sample-repeat/);
   assert.doesNotMatch(source, /node src[\\/]cli\.mjs clv/);
   assert.match(source, /reports[\\/]logs/);
   assert.match(source, /Start-Transcript/);

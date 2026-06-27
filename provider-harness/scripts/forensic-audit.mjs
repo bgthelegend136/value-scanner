@@ -169,15 +169,18 @@ function summarizeScan(rows, path) {
   };
 }
 
-function summarizeLive({ statusRows, trainingRows, auditRows, lifetimeRows }) {
+function summarizeLive({ statusRows, trainingRows, feedStatsRows, auditRows, lifetimeRows }) {
   return {
     statusRows: statusRows.length,
     trainingRows: trainingRows.length,
+    feedStatsRows: feedStatsRows.length,
     shadowAuditRows: auditRows.length,
     lifetimeRows: lifetimeRows.length,
     trainingByTier: countBy(trainingRows, (row) => row.sampleTier),
     trainingByMarket: countBy(trainingRows, (row) => row.market),
     statusByType: countBy(statusRows, (row) => row.eventStatus),
+    feedStatsByType: countBy(feedStatsRows, (row) => row.messageType),
+    feedStatsByBookmaker: countBy(feedStatsRows, (row) => row.bookmaker),
   };
 }
 
@@ -460,6 +463,7 @@ function renderMarkdown(report) {
     "## Live Pipeline",
     `Status rows: ${report.live.statusRows}`,
     `Training rows: ${report.live.trainingRows}`,
+    `Feed stats rows: ${report.live.feedStatsRows}`,
     `Shadow audit rows: ${report.live.shadowAuditRows}`,
     `Lifetime rows: ${report.live.lifetimeRows}`,
     `WebSocket probe processes: ${report.runtime.websocketProbeProcesses}`,
@@ -498,6 +502,7 @@ export async function buildAuditReport({
   const mispricingRows = await readCsvIfPresent(join(resolvedReportsDir, "mispricing-audit.csv"));
   const liveStatusRows = await readCsvIfPresent(join(resolvedReportsDir, "live-event-status.csv"));
   const liveTrainingRows = await readCsvIfPresent(join(resolvedReportsDir, "live-training-observations.csv"));
+  const liveFeedStatsRows = await readCsvIfPresent(join(resolvedReportsDir, "ws-live-feed-stats.csv"));
   const liveAuditRows = await readCsvIfPresent(join(resolvedReportsDir, "ws-live-shadow-audit.csv"));
   const lifetimeRows = await readCsvIfPresent(join(resolvedReportsDir, "ws-lifetime-log.csv"));
   const scanPath = await latestScanAllPath(resolvedReportsDir);
@@ -523,6 +528,7 @@ export async function buildAuditReport({
     live: summarizeLive({
       statusRows: liveStatusRows,
       trainingRows: liveTrainingRows,
+      feedStatsRows: liveFeedStatsRows,
       auditRows: liveAuditRows,
       lifetimeRows,
     }),
