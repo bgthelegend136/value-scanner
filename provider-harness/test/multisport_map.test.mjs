@@ -228,6 +228,14 @@ test("the shipped seed registry is valid and loadable", async () => {
   assert.equal(registry.get("baseball|usa-mlb"), "baseball_mlb");
   assert.equal(registry.get("football|brazil-brasileiro-serie-a"), "soccer_brazil_campeonato");
   assert.equal(registry.get("football|ireland-premier-division"), "soccer_league_of_ireland");
+  assert.equal(registry.get("football|england-championship"), "soccer_efl_champ");
+  assert.equal(registry.get("football|england-league-one"), "soccer_england_league1");
+  assert.equal(registry.get("football|england-league-two"), "soccer_england_league2");
+  assert.equal(registry.get("football|norway-eliteserien"), "soccer_norway_eliteserien");
+  assert.equal(registry.get("football|sweden-allsvenskan"), "soccer_sweden_allsvenskan");
+  assert.equal(registry.get("football|germany-dfb-pokal"), "soccer_germany_dfb_pokal");
+  assert.equal(registry.get("football|finland-veikkausliiga"), "soccer_finland_veikkausliiga");
+  assert.equal(registry.get("basketball|usa-wnba"), "basketball_wnba");
   for (const [key, value] of registry) {
     assert.match(key, /^[a-z0-9-]+\|[a-z0-9-]+$/u);
     assert.match(String(value), /^[a-z0-9_]+$/u);

@@ -34,6 +34,16 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (P4 paper coverage mapping).** Added 8
+> paper-scan registry mappings from the Cursor/Odds-API.io probe after a fresh
+> zero-cost The Odds API `/sports` check confirmed all reference keys active:
+> EFL Championship, League One, League Two, Norway Eliteserien, Sweden
+> Allsvenskan, DFB-Pokal, Finland Veikkausliiga, and WNBA. No Telegram,
+> threshold, live-market, or settlement behavior changed. Live paper scan after
+> mapping: 18 in-season leagues, 35 matched fixtures, 6 value bets, 2 new paper
+> bets, 4 duplicates, The Odds API quota 221. `value-flow-report`: paper=22,
+> audit=3943, latestScanRows=159, top rejection `CANDIDATE_EV_BELOW_MIN`=3731.
+>
 > **Status update 2026-06-27 (Codex improvement plan).** Quant diagnosis:
 > the low bet count is expected from the current narrow universe, not evidence
 > of a broken model. Live audit is dominated by `CANDIDATE_EV_BELOW_MIN`
