@@ -5,12 +5,16 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  applyLiveEventState,
   applyWsMessage,
   buildWsUrl,
   createSerializedCsvAppender,
   createLifetimeState,
   evaluateStrictEvMessage,
   evaluateStrictEvMessageWithAudit,
+  liveEventStatusPath,
+  liveEventStatusRow,
+  liveTrainingPath,
   liveShadowAuditPath,
   redactWsUrl,
 } from "../scripts/ws-lifetime-probe.mjs";
@@ -24,15 +28,25 @@ function refBook(key, home, draw, away) {
     key,
     title: key,
     last_update: NOW.toISOString(),
-    markets: [{
-      key: "h2h",
-      last_update: NOW.toISOString(),
-      outcomes: [
-        { name: "Japan", price: home },
-        { name: "Sweden", price: away },
-        { name: "Draw", price: draw },
-      ],
-    }],
+    markets: [
+      {
+        key: "h2h",
+        last_update: NOW.toISOString(),
+        outcomes: [
+          { name: "Japan", price: home },
+          { name: "Sweden", price: away },
+          { name: "Draw", price: draw },
+        ],
+      },
+      {
+        key: "totals",
+        last_update: NOW.toISOString(),
+        outcomes: [
+          { name: "Over", point: 2.5, price: 2.10 },
+          { name: "Under", point: 2.5, price: 1.80 },
+        ],
+      },
+    ],
   };
 }
 
@@ -135,6 +149,30 @@ test("live shadow audit path is opt-in and can be overridden", () => {
   assert.equal(
     liveShadowAuditPath({ argv: ["--audit-output=C:\\tmp\\audit.csv"], reportsDir: "reports" }),
     "C:\\tmp\\audit.csv",
+  );
+});
+
+test("live training path is opt-in and can be overridden", () => {
+  assert.equal(liveTrainingPath({ argv: [], reportsDir: "reports" }), "");
+  assert.equal(
+    liveTrainingPath({ argv: ["--live-training"], reportsDir: "reports" }),
+    "reports\\live-training-observations.csv",
+  );
+  assert.equal(
+    liveTrainingPath({ argv: ["--training-output=C:\\tmp\\training.csv"], reportsDir: "reports" }),
+    "C:\\tmp\\training.csv",
+  );
+});
+
+test("live event status path follows live training and can be overridden", () => {
+  assert.equal(liveEventStatusPath({ argv: [], reportsDir: "reports" }), "");
+  assert.equal(
+    liveEventStatusPath({ argv: ["--live-training"], reportsDir: "reports" }),
+    "reports\\live-event-status.csv",
+  );
+  assert.equal(
+    liveEventStatusPath({ argv: ["--status-output=C:\\tmp\\status.csv"], reportsDir: "reports" }),
+    "C:\\tmp\\status.csv",
   );
 });
 
@@ -243,6 +281,106 @@ test("live shadow audit records rejected strict-EV candidate evaluations", async
   assert.equal(home.sportKey, "soccer_fifa_world_cup");
   assert.equal(home.offeredOdds, "1.9000");
   assert.doesNotMatch(JSON.stringify(home), /secret|apiKey/i);
+});
+
+test("live training records EV-banded control and value observations", async () => {
+  const state = createLifetimeState();
+  const { closed, audit, training } = await evaluateStrictEvMessageWithAudit(state, wsMessage({
+    homeOdds: "1.90",
+  }), {
+    referenceClient: referenceClient(),
+    registry: new Map([["football|fifa-world-cup", "soccer_fifa_world_cup"]]),
+    activeSports: [{ key: "soccer_fifa_world_cup", active: true, group: "Soccer", title: "FIFA World Cup" }],
+    now: NOW,
+    trainingMinEv: -0.10,
+  });
+
+  assert.deepEqual(closed, []);
+  assert.equal(audit.length, 3);
+  assert.ok(training.length >= 1);
+  const home = training.find((row) => row.outcome === "1");
+  assert.equal(home.sampleTier, "LIVE_CONTROL");
+  assert.equal(home.confirmationStatus, "REJECTED");
+  assert.equal(home.rejectionReason, "PINNACLE_EV_BELOW_MIN");
+  assert.equal(home.referenceEventId, "ref-501");
+  assert.equal(home.bookmaker, "Stoiximan");
+  assert.equal(home.market, "MATCH_RESULT");
+  assert.match(home.pinnacleFairProbability, /^\d+\.\d{6}$/u);
+  assert.match(home.minimumConfirmedEv, /^-/u);
+});
+
+test("live training enriches odds observations with latest score and status state", async () => {
+  const state = createLifetimeState();
+  const liveEventStates = new Map();
+  applyLiveEventState(liveEventStates, {
+    type: "status",
+    id: "evt-501",
+    timestamp: TIMESTAMP - 10,
+    status: "live",
+    scores: { home: 2, away: 1 },
+  });
+
+  const { training } = await evaluateStrictEvMessageWithAudit(state, wsMessage({
+    homeOdds: "1.90",
+  }), {
+    referenceClient: referenceClient(),
+    registry: new Map([["football|fifa-world-cup", "soccer_fifa_world_cup"]]),
+    activeSports: [{ key: "soccer_fifa_world_cup", active: true, group: "Soccer", title: "FIFA World Cup" }],
+    now: NOW,
+    scoreStateByEvent: liveEventStates,
+    trainingMinEv: -0.10,
+  });
+
+  assert.equal(training[0].liveStatus, "live");
+  assert.equal(training[0].homeScore, "2");
+  assert.equal(training[0].awayScore, "1");
+});
+
+test("live event status rows persist score/status messages for later settlement joins", () => {
+  assert.equal(liveEventStatusRow({ type: "welcome" }), null);
+  assert.deepEqual(liveEventStatusRow({
+    type: "status",
+    id: "evt-501",
+    timestamp: TIMESTAMP,
+    status: "settled",
+    scores: { home: 2, away: 1 },
+  }), {
+    observedAt: NOW.toISOString(),
+    providerEventId: "evt-501",
+    eventStatus: "settled",
+    homeScore: "2",
+    awayScore: "1",
+  });
+});
+
+test("strict EV live probe evaluates totals markets against totals reference odds", async () => {
+  const state = createLifetimeState();
+  const message = {
+    ...wsMessage({ homeOdds: null, drawOdds: null, awayOdds: null }),
+    markets: [{
+      name: "Totals",
+      updatedAt: NOW.toISOString(),
+      odds: [{ hdp: 2.5, over: "2.50", under: "1.60" }],
+    }],
+  };
+
+  const { audit, training } = await evaluateStrictEvMessageWithAudit(state, message, {
+    referenceClient: referenceClient(),
+    registry: new Map([["football|fifa-world-cup", "soccer_fifa_world_cup"]]),
+    activeSports: [{ key: "soccer_fifa_world_cup", active: true, group: "Soccer", title: "FIFA World Cup" }],
+    now: NOW,
+    trainingMinEv: -0.10,
+  });
+
+  assert.equal(audit.length, 2);
+  assert.equal(audit[0].market, "TOTALS");
+  assert.equal(audit[0].line, "2.5");
+  assert.equal(audit[0].reason, "");
+  assert.equal(audit[0].status, "CONFIRMED");
+  assert.ok(training.length >= 1);
+  const over = training.find((row) => row.outcome === "OVER");
+  assert.equal(over.market, "TOTALS");
+  assert.equal(over.sampleTier, "STRICT_CONFIRMED");
 });
 
 test("serialized CSV appender preserves concurrent websocket audit writes", async () => {

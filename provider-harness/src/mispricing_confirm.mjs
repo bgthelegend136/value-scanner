@@ -34,9 +34,8 @@ function validTimestamp(value, now, maxAgeMs) {
     timestamp <= now.getTime() + 60_000;
 }
 
-// v1 supports MATCH_RESULT only. Football-style sports carry a draw; everything
-// else is two-way. A market must contain exactly these outcomes to be de-vigged.
 function expectedOutcomes(candidate) {
+  if (candidate.market === "TOTALS") return new Set(["OVER", "UNDER"]);
   return candidate.sportSlug === "football"
     ? new Set(["1", "X", "2"])
     : new Set(["1", "2"]);

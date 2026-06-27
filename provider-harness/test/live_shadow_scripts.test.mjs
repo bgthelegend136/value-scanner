@@ -10,8 +10,11 @@ test("live-shadow runner invokes websocket probe in measurement-only live mode",
 
   assert.match(source, /node scripts[\\/]ws-lifetime-probe\.mjs/);
   assert.match(source, /--live-shadow/);
+  assert.match(source, /--live-training/);
+  assert.match(source, /--live-training-min-ev=-5/);
   assert.match(source, /--status=live/);
   assert.match(source, /--channels=odds,scores,status/);
+  assert.match(source, /--markets=ML,Totals/);
   assert.match(source, /--duration-minutes=120/);
   assert.match(source, /reports[\\/]logs/);
   assert.match(source, /live-shadow-\$Stamp\.log/);

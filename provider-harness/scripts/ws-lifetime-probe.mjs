@@ -45,6 +45,18 @@ const STRICT_AUDIT_COLUMNS = [
   "status", "reason", "pinnacleEv", "consensusEv", "consensusBooks",
   "minimumConfirmedEv", "edgeOverDispersion",
 ];
+const LIVE_TRAINING_COLUMNS = [
+  "observedAt", "seq", "providerEventId", "referenceEventId", "sportKey",
+  "liveStatus", "homeScore", "awayScore",
+  "bookmaker", "match", "market", "line", "outcome", "offeredOdds",
+  "pinnacleFairProbability", "pinnacleFairOdds", "pinnacleEv",
+  "consensusFairProbability", "consensusFairOdds", "consensusEv", "consensusBooks",
+  "minimumConfirmedEv", "edgeOverDispersion",
+  "sampleTier", "confirmationStatus", "rejectionReason",
+];
+const LIVE_EVENT_STATUS_COLUMNS = [
+  "observedAt", "providerEventId", "eventStatus", "homeScore", "awayScore",
+];
 
 function option(argv, name, fallback = undefined) {
   const hit = argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -133,6 +145,18 @@ export function liveShadowAuditPath({ argv, reportsDir }) {
   return hasFlag(argv, "live-shadow") ? join(reportsDir, "ws-live-shadow-audit.csv") : "";
 }
 
+export function liveTrainingPath({ argv, reportsDir }) {
+  const explicit = option(argv, "training-output", "");
+  if (explicit) return explicit;
+  return hasFlag(argv, "live-training") ? join(reportsDir, "live-training-observations.csv") : "";
+}
+
+export function liveEventStatusPath({ argv, reportsDir }) {
+  const explicit = option(argv, "status-output", "");
+  if (explicit) return explicit;
+  return hasFlag(argv, "live-training") ? join(reportsDir, "live-event-status.csv") : "";
+}
+
 export function createLifetimeState() {
   return {
     active: new Map(),
@@ -168,6 +192,38 @@ function extractMlSelections(message) {
   return selections;
 }
 
+function extractTotalsSelections(message) {
+  const selections = [];
+  for (const market of message.markets ?? []) {
+    if (!["totals", "total"].includes(marketName(market.name))) continue;
+    for (const odds of market.odds ?? []) {
+      const line = odds.hdp ?? odds.line ?? odds.point ?? odds.total;
+      if (line === undefined || line === null || String(line).trim() === "") continue;
+      for (const [field, outcome] of [["over", "OVER"], ["under", "UNDER"]]) {
+        const decimalOdds = finiteOdds(odds[field]);
+        if (!decimalOdds) continue;
+        selections.push({
+          eventId: String(message.id),
+          bookmaker: String(message.bookie ?? ""),
+          market: "TOTALS",
+          line: String(line),
+          outcome,
+          decimalOdds,
+          quoteUpdatedAt: market.updatedAt ?? "",
+        });
+      }
+    }
+  }
+  return selections;
+}
+
+function extractWsSelections(message) {
+  return [
+    ...extractMlSelections(message),
+    ...extractTotalsSelections(message),
+  ];
+}
+
 function eventDetails(message) {
   const event = message.event ?? {};
   return {
@@ -189,7 +245,7 @@ function extractWsCandidates(message, { targetBookmakers = TARGET_BOOKMAKERS, no
     ? Number(message.timestamp)
     : Math.floor(new Date(now).getTime() / 1000);
   const valueUpdatedAt = isoFromTimestamp(timestamp, now);
-  return extractMlSelections({ ...message, bookie: bookmaker }).map((selection) => ({
+  return extractWsSelections({ ...message, bookie: bookmaker }).map((selection) => ({
     candidateId: `${message.id}-${bookmaker}-${selection.market}-${selection.line}-${selection.outcome}`,
     providerEventId: String(message.id),
     bookmaker,
@@ -322,6 +378,80 @@ function strictAuditRow(candidate, { sportKey = "", confirmation = {}, timestamp
     consensusBooks: String(confirmation.consensusBooks ?? ""),
     minimumConfirmedEv: formatNumber(confirmation.minimumConfirmedEv),
     edgeOverDispersion: formatNumber(confirmation.edgeOverDispersion),
+  };
+}
+
+function scoreText(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? String(parsed) : "";
+}
+
+export function applyLiveEventState(scoreStateByEvent, message) {
+  if (!scoreStateByEvent || !message?.id) return;
+  if (message.type !== "score" && message.type !== "status") return;
+  const previous = scoreStateByEvent.get(String(message.id)) ?? {};
+  const scores = message.scores ?? {};
+  scoreStateByEvent.set(String(message.id), {
+    ...previous,
+    liveStatus: message.status ?? previous.liveStatus ?? "",
+    homeScore: scores.home ?? previous.homeScore ?? "",
+    awayScore: scores.away ?? previous.awayScore ?? "",
+    scoreUpdatedAt: isoFromTimestamp(message.timestamp, new Date()),
+  });
+}
+
+export function liveEventStatusRow(message) {
+  if (!message?.id || (message.type !== "score" && message.type !== "status")) return null;
+  const scores = message.scores ?? {};
+  return {
+    observedAt: isoFromTimestamp(message.timestamp),
+    providerEventId: String(message.id),
+    eventStatus: String(message.status ?? message.type ?? ""),
+    homeScore: scoreText(scores.home),
+    awayScore: scoreText(scores.away),
+  };
+}
+
+function trainingTier(confirmation) {
+  if (confirmation.status === "CONFIRMED") return "STRICT_CONFIRMED";
+  const ev = Number(confirmation.minimumConfirmedEv);
+  return Number.isFinite(ev) && ev >= 0 ? "LIVE_VALUE" : "LIVE_CONTROL";
+}
+
+function liveTrainingRow(candidate, {
+  sportKey = "",
+  confirmation = {},
+  timestamp,
+  seq,
+  scoreState = {},
+}) {
+  return {
+    observedAt: isoFromTimestamp(timestamp),
+    seq: String(seq ?? ""),
+    providerEventId: candidate.providerEventId,
+    referenceEventId: confirmation.referenceEventId ?? "",
+    sportKey,
+    liveStatus: scoreState.liveStatus ?? "",
+    homeScore: scoreText(scoreState.homeScore),
+    awayScore: scoreText(scoreState.awayScore),
+    bookmaker: candidate.bookmaker,
+    match: `${candidate.participantOne} - ${candidate.participantTwo}`,
+    market: candidate.market,
+    line: candidate.line,
+    outcome: candidate.outcome,
+    offeredOdds: formatNumber(candidate.offeredOdds),
+    pinnacleFairProbability: formatNumber(confirmation.pinnacleFairProbability, 6),
+    pinnacleFairOdds: formatNumber(confirmation.pinnacleFairOdds),
+    pinnacleEv: formatNumber(confirmation.pinnacleEv),
+    consensusFairProbability: formatNumber(confirmation.consensusFairProbability, 6),
+    consensusFairOdds: formatNumber(confirmation.consensusFairOdds),
+    consensusEv: formatNumber(confirmation.consensusEv),
+    consensusBooks: String(confirmation.consensusBooks ?? ""),
+    minimumConfirmedEv: formatNumber(confirmation.minimumConfirmedEv),
+    edgeOverDispersion: formatNumber(confirmation.edgeOverDispersion),
+    sampleTier: trainingTier(confirmation),
+    confirmationStatus: confirmation.status ?? "REJECTED",
+    rejectionReason: confirmation.reason ?? "",
   };
 }
 
@@ -462,7 +592,7 @@ export function applyWsMessage(
 
 async function defaultReferenceSnapshot(referenceClient, sportKey) {
   const events = await referenceClient.listEvents({ sportKey });
-  const odds = await referenceClient.getOdds({ sportKey, markets: "h2h" });
+  const odds = await referenceClient.getOdds({ sportKey, markets: "h2h,totals" });
   return {
     events: events.data ?? [],
     selections: normalizeTheOddsResponse(odds.data ?? [], odds.receivedAt),
@@ -479,16 +609,18 @@ export async function evaluateStrictEvMessageWithAudit(
     sportKey: explicitSportKey = "",
     targetBookmakers = TARGET_BOOKMAKERS,
     referenceSnapshot = null,
+    scoreStateByEvent = new Map(),
+    trainingMinEv = null,
     now = new Date(),
   } = {},
 ) {
   if (message?.seq) state.lastSeq = Number(message.seq);
   if (!message || message.type === "welcome" || message.type === "score" || message.type === "status") {
-    return { closed: [], audit: [] };
+    return { closed: [], audit: [], training: [] };
   }
   if (message.type === "resync_required") {
     state.resyncRequired = message;
-    return { closed: [], audit: [] };
+    return { closed: [], audit: [], training: [] };
   }
 
   const timestamp = Number.isFinite(Number(message.timestamp))
@@ -497,7 +629,7 @@ export async function evaluateStrictEvMessageWithAudit(
   const seq = message.seq ?? "";
   const bookmaker = String(message.bookie ?? message.bookmaker ?? "");
   if (targetBookmakers?.size && bookmaker && !targetBookmakers.has(bookmaker)) {
-    return { closed: [], audit: [] };
+    return { closed: [], audit: [], training: [] };
   }
 
   if (message.type === "deleted" || message.type === "no_markets") {
@@ -508,9 +640,10 @@ export async function evaluateStrictEvMessageWithAudit(
       { reason: message.type === "deleted" ? "DELETED" : "NO_MARKETS", timestamp, seq },
       ),
       audit: [],
+      training: [],
     };
   }
-  if (message.type !== "created" && message.type !== "updated") return { closed: [], audit: [] };
+  if (message.type !== "created" && message.type !== "updated") return { closed: [], audit: [], training: [] };
 
   const candidates = extractWsCandidates(message, { targetBookmakers, now });
   const activeKeys = new Set(activeSports.filter((sport) => sport.active !== false).map((sport) => sport.key));
@@ -562,6 +695,7 @@ export async function evaluateStrictEvMessageWithAudit(
 
   const closed = [];
   const audit = [];
+  const training = [];
   const seen = new Set(candidates.map((candidate) => candidateIdentity(candidate)));
   for (const [identity, result] of evaluations) {
     audit.push(strictAuditRow(result.candidate, {
@@ -570,6 +704,16 @@ export async function evaluateStrictEvMessageWithAudit(
       timestamp,
       seq,
     }));
+    const minimumEv = Number(result.confirmation.minimumConfirmedEv);
+    if (Number.isFinite(trainingMinEv) && Number.isFinite(minimumEv) && minimumEv >= trainingMinEv) {
+      training.push(liveTrainingRow(result.candidate, {
+        sportKey: result.sportKey ?? "",
+        confirmation: result.confirmation,
+        timestamp,
+        seq,
+        scoreState: scoreStateByEvent.get(String(result.candidate.providerEventId)) ?? {},
+      }));
+    }
     if (result.confirmation.status === "CONFIRMED") {
       openOrUpdateStrict(state, result.candidate, result.confirmation, {
         sportKey: result.sportKey,
@@ -598,7 +742,7 @@ export async function evaluateStrictEvMessageWithAudit(
     state.active.delete(identity);
   }
 
-  return { closed, audit };
+  return { closed, audit, training };
 }
 
 export async function evaluateStrictEvMessage(state, message, options = {}) {
@@ -661,16 +805,26 @@ async function runProbe(argv = process.argv.slice(2)) {
   const state = createLifetimeState();
   const appendStrictRows = createSerializedCsvAppender(STRICT_CSV_COLUMNS);
   const appendAuditRows = createSerializedCsvAppender(STRICT_AUDIT_COLUMNS);
+  const appendTrainingRows = createSerializedCsvAppender(LIVE_TRAINING_COLUMNS);
+  const appendLiveStatusRows = createSerializedCsvAppender(LIVE_EVENT_STATUS_COLUMNS);
   const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
   const outputPath = resolve(option(argv, "output", join(reportsDir, "ws-lifetime-log.csv")));
   const auditOutput = liveShadowAuditPath({ argv, reportsDir });
   const auditOutputPath = auditOutput ? resolve(auditOutput) : "";
+  const trainingOutput = liveTrainingPath({ argv, reportsDir });
+  const trainingOutputPath = trainingOutput ? resolve(trainingOutput) : "";
+  const statusOutput = liveEventStatusPath({ argv, reportsDir });
+  const statusOutputPath = statusOutput ? resolve(statusOutput) : "";
+  const trainingMinEv = trainingOutputPath
+    ? numericOption(argv, "live-training-min-ev", -5) / 100
+    : null;
   const durationMinutes = numericOption(argv, "duration-minutes", 120);
   const referenceTtlMs = numericOption(argv, "reference-ttl-seconds", 60) * 1000;
   const targetBookmakers = new Set(splitOption(argv, "bookmakers"));
   const effectiveBookmakers = targetBookmakers.size ? targetBookmakers : TARGET_BOOKMAKERS;
   const explicitSportKey = option(argv, "sport-key", "");
   const referenceCache = new Map();
+  const liveEventStates = new Map();
   const referenceSnapshot = async (sportKey) => {
     const cached = referenceCache.get(sportKey);
     if (cached && Date.now() - cached.cachedAt < referenceTtlMs) return cached.snapshot;
@@ -712,19 +866,26 @@ async function runProbe(argv = process.argv.slice(2)) {
       if (message.type === "welcome") {
         console.log(`Welcome: channels=${(message.channels ?? []).join(",") || "?"}, bookmakers=${(message.bookmakers ?? []).join(",") || "?"}`);
       }
-      const { closed: rows, audit } = await evaluateStrictEvMessageWithAudit(state, message, {
+      applyLiveEventState(liveEventStates, message);
+      const statusRow = liveEventStatusRow(message);
+      const { closed: rows, audit, training } = await evaluateStrictEvMessageWithAudit(state, message, {
         referenceClient,
         registry,
         activeSports: sportsResponse.data ?? [],
         sportKey: explicitSportKey,
         targetBookmakers: effectiveBookmakers,
         referenceSnapshot,
+        scoreStateByEvent: liveEventStates,
+        trainingMinEv,
         now: new Date(),
       });
       await appendStrictRows(outputPath, rows);
       if (auditOutputPath) await appendAuditRows(auditOutputPath, audit);
+      if (trainingOutputPath) await appendTrainingRows(trainingOutputPath, training);
+      if (statusOutputPath && statusRow) await appendLiveStatusRows(statusOutputPath, [statusRow]);
       if (rows.length) console.log(`Closed ${rows.length} lifetime row(s); lastSeq=${state.lastSeq || "?"}`);
       if (auditOutputPath && audit.length) console.log(`Audited ${audit.length} strict EV candidate row(s); lastSeq=${state.lastSeq || "?"}`);
+      if (trainingOutputPath && training.length) console.log(`Recorded ${training.length} live training observation(s); lastSeq=${state.lastSeq || "?"}`);
       if (state.resyncRequired) {
         console.error(`resync_required: ${state.resyncRequired.reason ?? "unknown"}; reconnecting with latest seq after close`);
         ws?.close();

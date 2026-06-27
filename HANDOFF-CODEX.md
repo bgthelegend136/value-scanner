@@ -34,6 +34,23 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-27 (live training pipeline enabled).** P8 live remains
+> measurement-only: no Telegram, no auto-betting, no scraping/login, and no
+> 10% alert-floor change. `scripts/ws-lifetime-probe.mjs` now has opt-in
+> `--live-training` and writes a separate
+> `reports/live-training-observations.csv` ledger for EV-banded in-play rows
+> (`LIVE_CONTROL`, `LIVE_VALUE`, `STRICT_CONFIRMED`) with Pinnacle fair prob,
+> 3-book consensus prob, min confirmed EV, score/status context, and rejection
+> reason. It also writes `reports/live-event-status.csv` for score/status rows
+> that can later be joined for live settlement/labeling. Live shadow now requests
+> `--markets=ML,Totals`; strict confirmation supports `TOTALS` as `OVER/UNDER`
+> while preserving the same Pinnacle + 3-book consensus rule. Runtime
+> `Bet-Live-Shadow` was restarted on the new runner, an orphan old node probe
+> from the 14:00 run was stopped, and exactly one new live probe remains running.
+> Runtime evidence: `reports/live-event-status.csv` already has score rows; no
+> live training odds row had arrived in the short post-restart check. Verification:
+> focused TDD plus full `npm test` / `node --test` **231/231 passing**.
+>
 > **Status update 2026-06-27 (fast paper volume mode).** To make ~200 paper
 > observations reachable today/tomorrow, paper `scan` now has opt-in sampling flags:
 > `--sample-min-ev=N`, `--sample-limit=M`, and `--sample-repeat`. The aggressive
