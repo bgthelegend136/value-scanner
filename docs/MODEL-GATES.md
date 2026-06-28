@@ -23,6 +23,7 @@ must not influence primary h2h readiness.
 | CONTROL h2h settled sample | `>= 200` |
 | VALUE average CLV | `> 0` |
 | VALUE vs CONTROL CLV separation | VALUE must be materially better |
+| Matched VALUE vs CONTROL buckets | VALUE must beat CONTROL in comparable market/odds/time buckets |
 | Data health | no unexplained `ERROR` rows |
 | Live evidence | required only for live/staking decisions |
 | Staking | simulation-only until all evidence gates pass |
@@ -44,6 +45,8 @@ No command in the current roadmap enables real-money staking.
 - CLV is a faster leading indicator but can still be biased by stale captures or
   duplicated selections.
 - CONTROL comparison prevents mistaking broad market drift for model edge.
+- Matched-control buckets compare VALUE and CONTROL within market, odds bucket,
+  and time-to-close bucket.
 - Event-level dedupe prevents one match from pretending to be many independent
   samples.
 - Live WebSocket output is not useful until it emits real market messages.
@@ -55,5 +58,7 @@ A threshold can be changed only after:
 - `calibration-report` shows stable EV/CLV ordering;
 - `profitability-report` shows segment-level VALUE superiority;
 - `staking-sim` shows acceptable drawdown and ruin risk;
+- capped Kelly and daily-exposure simulations remain acceptable under the same
+  sample;
 - `data-health` issues are fixed or explicitly accepted;
 - the change is recorded in `docs/PROJECT-PROGRESS-DECISIONS.md` with evidence.

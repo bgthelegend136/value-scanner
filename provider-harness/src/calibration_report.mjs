@@ -111,6 +111,36 @@ function monotonicity(rows) {
   return { status: "PASS", reason: "" };
 }
 
+function matchedControlComparisons(rows) {
+  const buckets = new Map();
+  for (const row of rows.filter(hasClv)) {
+    const tier = tierGroup(row);
+    if (!["VALUE", "CONTROL"].includes(tier)) continue;
+    const key = `${row.market || "(blank)"}|${oddsBucket(optionalNumber(row.decimalOdds))}|${timeToCloseBucket(row)}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, { key, valueClvs: [], controlClvs: [] });
+    }
+    const clv = optionalNumber(row.clv);
+    if (tier === "VALUE") buckets.get(key).valueClvs.push(clv);
+    if (tier === "CONTROL") buckets.get(key).controlClvs.push(clv);
+  }
+  return [...buckets.values()]
+    .filter((bucket) => bucket.valueClvs.length > 0 && bucket.controlClvs.length > 0)
+    .map((bucket) => {
+      const valueAverageClv = average(bucket.valueClvs);
+      const controlAverageClv = average(bucket.controlClvs);
+      return {
+        key: bucket.key,
+        valueCount: bucket.valueClvs.length,
+        controlCount: bucket.controlClvs.length,
+        valueAverageClv,
+        controlAverageClv,
+        clvSeparation: valueAverageClv - controlAverageClv,
+      };
+    })
+    .sort((left, right) => right.valueCount - left.valueCount || left.key.localeCompare(right.key));
+}
+
 export function buildCalibrationReport({ rows = [], generatedAt = new Date().toISOString() } = {}) {
   const buckets = new Map();
   for (const row of rows.filter(hasClv)) {
@@ -128,6 +158,7 @@ export function buildCalibrationReport({ rows = [], generatedAt = new Date().toI
   const valueMatchResult = reportRows.find((row) => row.scope === "primary" && row.key === "MATCH_RESULT|VALUE") ?? null;
   const controlMatchResult = reportRows.find((row) => row.scope === "primary" && row.key === "MATCH_RESULT|CONTROL") ?? null;
   const mono = monotonicity(reportRows);
+  const comparisons = matchedControlComparisons(rows);
   const ready = valueMatchResult &&
     valueMatchResult.count >= 200 &&
     (valueMatchResult.avgClv ?? -1) > 0 &&
@@ -145,6 +176,7 @@ export function buildCalibrationReport({ rows = [], generatedAt = new Date().toI
       valueMatchResult: valueMatchResult ?? {},
       controlMatchResult: controlMatchResult ?? {},
     },
+    matchedControlComparisons: comparisons,
     rows: reportRows,
   };
 }

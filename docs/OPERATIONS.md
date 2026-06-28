@@ -12,7 +12,7 @@ Run these from `provider-harness`:
 node src/cli.mjs data-health
 node src/cli.mjs profitability-report
 node src/cli.mjs calibration-report
-node src/cli.mjs staking-sim --bankroll=1000 --policy=flat --max-stake=10
+node src/cli.mjs staking-sim --bankroll=1000 --policy=kelly25 --max-stake=100 --daily-exposure-pct=5
 node src/cli.mjs profit-engine
 node src/cli.mjs daily-decision-report
 ```
@@ -56,6 +56,30 @@ diagnostic-only and use `live-updated-poll` for fallback measurement.
 - `LIVE_WS_HAS_NO_MARKET_MESSAGES` means the WebSocket is not usable for live
   training or staking.
 - `VALUE_MATCH_RESULT_*_BELOW_200` means h2h sample is still research-only.
+
+## Staking Simulation Policy
+
+`staking-sim` is research-only. Use it to compare flat staking with capped
+fractional Kelly, daily exposure, market exposure, bookmaker exposure, drawdown,
+and bootstrap-style risk diagnostics.
+
+Recommended research command:
+
+```powershell
+node src/cli.mjs staking-sim --bankroll=1000 --policy=kelly25 --max-stake=100 --daily-exposure-pct=5
+```
+
+Supported policies:
+
+| Policy | Meaning |
+| --- | --- |
+| `flat` | Fixed stake equal to `--max-stake`. |
+| `flat_pct` | 1% bankroll stake capped by `--max-stake`. |
+| `kelly10` | 10% fractional Kelly capped by `--max-stake`. |
+| `kelly25` | 25% fractional Kelly capped by `--max-stake`. |
+
+The daily exposure cap is enforced per `firstSeenAt` date. It limits simulated
+stake volume; it does not approve live staking.
 
 ## Credit Spending Policy
 

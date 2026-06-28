@@ -158,6 +158,28 @@ test("calibration-report writes EV bucket diagnostics, matched control compariso
   assert.equal(json.monotonicity.status, "PASS");
 });
 
+test("calibration-report compares matched VALUE and CONTROL buckets and downgrades non-monotonic EV", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "calibration-report-phase2-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "low-value", ev: "0.010000", clv: "0.040000", profit: "1.0000" }),
+    paperRow({ referenceEventId: "high-value", ev: "0.080000", clv: "-0.020000", status: "LOST", profit: "-1.0000" }),
+    paperRow({ referenceEventId: "control-a", tier: "CONTROL", ev: "-0.010000", clv: "-0.020000", status: "LOST", profit: "-1.0000" }),
+    paperRow({ referenceEventId: "control-b", tier: "CONTROL", ev: "-0.015000", clv: "-0.010000", status: "LOST", profit: "-1.0000" }),
+  ], PAPER_COLUMNS);
+
+  const { code } = await runOffline("calibration-report", reportsDir);
+
+  assert.equal(code, 0);
+  const json = JSON.parse(await readFile(join(reportsDir, "calibration-report.json"), "utf8"));
+  assert.equal(json.monotonicity.status, "FAIL");
+  assert.equal(json.decision.modelStatus, "RANKING_SIGNAL");
+  assert.ok(json.matchedControlComparisons.some((row) =>
+    row.key === "MATCH_RESULT|1.50..2.00|0..360m" &&
+    row.valueCount === 2 &&
+    row.controlCount === 2 &&
+    row.clvSeparation > 0));
+});
+
 test("staking-sim simulates flat and capped Kelly policies without enabling real staking", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "staking-sim-"));
   await writeCsv(join(reportsDir, "paper-bets.csv"), [
@@ -185,6 +207,44 @@ test("staking-sim simulates flat and capped Kelly policies without enabling real
   assert.equal(json.realStakingEnabled, false);
   assert.equal(json.policy, "flat");
   assert.equal(json.summary.maxDrawdown, 10);
+});
+
+test("staking-sim enforces daily exposure cap and writes exposure/risk diagnostics", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "staking-sim-phase2-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "same-day-win", firstSeenAt: "2026-06-28T10:00:00.000Z", decimalOdds: "2.0000", ev: "0.200000", profit: "1.0000" }),
+    paperRow({ referenceEventId: "same-day-loss", firstSeenAt: "2026-06-28T10:05:00.000Z", decimalOdds: "2.0000", ev: "0.200000", outcome: "2", status: "LOST", profit: "-1.0000" }),
+    paperRow({ referenceEventId: "next-day-loss", firstSeenAt: "2026-06-29T10:00:00.000Z", decimalOdds: "2.0000", ev: "0.200000", outcome: "2", status: "LOST", profit: "-1.0000" }),
+  ], PAPER_COLUMNS);
+
+  const { code } = await runOffline("staking-sim", reportsDir, [
+    "--bankroll=1000",
+    "--policy=kelly25",
+    "--max-stake=100",
+    "--daily-exposure-pct=5",
+  ]);
+
+  assert.equal(code, 0);
+  const csv = await readCsv(join(reportsDir, "staking-sim.csv"));
+  const summary = csv.find((row) => row.scope === "summary" && row.key === "kelly25");
+  assert.equal(summary.maxDailyExposure, "50.000000");
+  assert.equal(summary.maxDailyExposurePct, "0.050000");
+  assert.equal(summary.realStakingEnabled, "false");
+  assert.ok(Number(summary.probabilityDrawdown20) >= 0);
+
+  assert.ok(csv.some((row) =>
+    row.scope === "dailyExposure" &&
+    row.key === "2026-06-28" &&
+    row.totalStaked === "50.000000"));
+  assert.ok(csv.some((row) =>
+    row.scope === "marketExposure" &&
+    row.key === "MATCH_RESULT" &&
+    row.totalStaked === "100.000000"));
+
+  const json = JSON.parse(await readFile(join(reportsDir, "staking-sim.json"), "utf8"));
+  assert.equal(json.summary.maxDailyExposure, 50);
+  assert.equal(json.exposure.daily[0].date, "2026-06-28");
+  assert.equal(json.risk.realStakingEnabled, false);
 });
 
 test("daily-decision-report summarizes blockers and next action from offline reports", async () => {

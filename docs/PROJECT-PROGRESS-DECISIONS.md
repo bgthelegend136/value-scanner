@@ -485,6 +485,38 @@ Interpretation:
 - Staking simulation is now available for research, but does not approve real
   staking.
 
+### 2026-06-28: Strengthen calibration and staking simulation
+
+Decision:
+
+- Extend `calibration-report` with matched VALUE-vs-CONTROL comparisons by
+  market, odds bucket, and time-to-close bucket.
+- Extend `staking-sim` with daily exposure caps, market/bookmaker exposure,
+  drawdown percentage, and deterministic drawdown risk diagnostics.
+- Add `--daily-exposure-pct` to `staking-sim`.
+
+Reason:
+
+- Overall CLV/ROI is not enough; VALUE must beat comparable CONTROL buckets.
+- Staking usefulness depends on exposure and drawdown, not only profit.
+- The project must stay research-only while still showing realistic bankroll
+  behavior.
+
+Latest real-data run:
+
+- `calibration-report`: RANKING_SIGNAL, monotonicity PASS.
+- Top matched h2h buckets show positive VALUE-vs-CONTROL CLV separation:
+  +2.45pp, +2.55pp, and +2.82pp in the first reported buckets.
+- `staking-sim --bankroll=1000 --policy=kelly25 --max-stake=100
+  --daily-exposure-pct=5`: final bankroll 1030.43, max drawdown 11.32,
+  max daily exposure 50.00, probabilityDrawdown20 0, ruinProbability 0.
+
+Interpretation:
+
+- Matched-control evidence is encouraging for h2h, but still not actionable
+  until the 200/200 sample gates are met and data-health issues are reviewed.
+- Kelly25 is a useful research simulator, not a staking approval.
+
 ## Next Gates
 
 Do not move beyond RESEARCH_ONLY until these gates are met:

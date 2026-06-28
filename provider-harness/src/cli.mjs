@@ -1822,6 +1822,7 @@ async function runStakingSim({ args, out, reportsDir, now }) {
   const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
   const bankroll = numericArg(args, "bankroll", 1000);
   const maxStake = numericArg(args, "max-stake", 10);
+  const dailyExposurePct = numericArg(args, "daily-exposure-pct", 5);
   const policy = optionValue(args, "policy", "flat");
   const report = buildStakingSimReport({
     rows: paperRows,
@@ -1829,6 +1830,7 @@ async function runStakingSim({ args, out, reportsDir, now }) {
     bankroll,
     policy,
     maxStake,
+    dailyExposurePct: dailyExposurePct / 100,
   });
   const csvRows = report.rows.map(stakingSimCsvRow);
   await writeCsv(join(reportsDir, "staking-sim.csv"), csvRows, STAKING_SIM_COLUMNS);
