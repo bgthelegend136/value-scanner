@@ -1,6 +1,6 @@
 # Project Progress and Decision Log
 
-Last updated: 2026-06-28 06:53 Europe/Athens
+Last updated: 2026-06-28 12:43 Europe/Athens
 
 This is the durable progress and decision log for the betting research harness.
 Every future strategic change should update this file with the evidence used,
@@ -24,45 +24,55 @@ The production alert rule remains narrow:
 
 ## Current Evidence Snapshot
 
-Fresh local diagnostics were run on 2026-06-28 at about 06:53 Europe/Athens:
+Fresh local diagnostics were run on 2026-06-28 at about 12:43 Europe/Athens:
 
 ```powershell
 node src/cli.mjs clv-calibrate
 node src/cli.mjs research-status
 node src/cli.mjs profit-engine
-node src/cli.mjs live-preflight --sport=football --bookmakers=Stoiximan,Novibet --markets=ML,Totals --max-events=50
-node src/cli.mjs live-updated-poll --sport=Football --bookmakers=Stoiximan,Novibet --markets=ML,Totals --duration-minutes=0 --interval-seconds=5
 ```
 
 Latest core metrics:
 
 | Metric | Current |
 | --- | ---: |
-| Paper rows | 1181 |
-| Unique selection count | 966 |
-| Total captured CLV rows | 531 |
-| VALUE CLV captured | 106 |
-| Main MATCH_RESULT VALUE CLV captured | 103 |
-| VALUE pending without CLV | 108 |
-| CONTROL CLV captured | 425 |
-| Missing VALUE CLV to 200 | 94 |
-| Missing VALUE CLV to 300 | 194 |
-| Settled paper rows | 7 |
-| Paper ROI | +86.29% |
+| Paper rows | 1193 |
+| Unique selection count | 978 |
+| Total captured CLV rows | 627 |
+| VALUE CLV captured | 122 |
+| Main MATCH_RESULT VALUE CLV captured | 119 |
+| VALUE pending without CLV | 83 |
+| CONTROL CLV captured | 505 |
+| Missing VALUE CLV to 200 | 78 |
+| Missing VALUE CLV to 300 | 178 |
+| Settled paper rows | 289 |
+| VALUE-tier settled rows | 69 |
+| Paper ROI | -0.93% |
 | Profit engine readiness | RESEARCH_ONLY |
 
 Latest signal metrics:
 
 | Segment | Current |
 | --- | ---: |
-| VALUE average CLV | +1.91% |
-| CONTROL average CLV | -2.02% |
-| Main VALUE MATCH_RESULT average CLV | +2.26% |
-| CLV regression slope | +1.0786 |
-| CLV regression R-squared | 0.2551 |
-| 0..2% EV bucket average CLV | +0.73% |
+| VALUE average CLV | +1.66% |
+| CONTROL average CLV | -2.12% |
+| Main VALUE MATCH_RESULT average CLV | +1.92% |
+| CLV regression slope | +0.9972 |
+| CLV regression R-squared | 0.2346 |
+| 0..2% EV bucket average CLV | +0.69% |
 | 2..5% EV bucket average CLV | +3.74% |
-| TOTALS average CLV | -3.42% |
+| TOTALS average CLV | -3.22% |
+
+Latest settled ROI by tier:
+
+| Segment | Settled | ROI |
+| --- | ---: | ---: |
+| VALUE only | 66 | +16.2% |
+| VALUE MATCH_RESULT only | 63 | +21.7% |
+| CONTROL | 220 | -5.7% |
+| CONTROL MATCH_RESULT | 192 | -3.4% |
+| CONTROL TOTALS | 28 | -21.2% |
+| VALUE TOTALS | 3 | -100.0% |
 
 Latest live diagnostics:
 
@@ -71,7 +81,8 @@ Latest live diagnostics:
 | Selected bookmakers visible | yes |
 | Live preflight usable events | 7 |
 | Live preflight maxSeq | 306953648 |
-| Live updated poll feed rows | 0 |
+| Live feed stats rows | 2 |
+| Live market messages | 0 |
 | Live training rows | 0 |
 | Live liquidity rows | 0 |
 
@@ -165,9 +176,11 @@ Working capabilities:
 
 Reliability:
 
-- Current settled count is only 7.
-- The +86.29% paper ROI is not decision-grade and should be ignored as a
-  profitability conclusion.
+- Current total settled count is 289, but VALUE-tier settled count is 69.
+- Overall paper ROI is -0.93%.
+- VALUE-only ROI is +16.2%, and VALUE MATCH_RESULT ROI is +21.7%.
+- CONTROL ROI is -5.7%.
+- This is encouraging, but still below the 200 VALUE-settled checkpoint.
 
 ### Profit engine
 
@@ -200,7 +213,7 @@ Working capabilities:
 
 - Fractional Kelly stake fraction: full Kelly equals edge / (odds - 1).
 - Default diagnostic assumptions: quarter Kelly and 2% stake cap.
-- Current sample average stake fraction over VALUE rows is about 0.6948%.
+- Current sample average stake fraction over VALUE rows is about 0.6758%.
 - Current sample max stake fraction is 2%.
 
 Reliability:
@@ -252,9 +265,13 @@ Missing:
 
 Current state:
 
-- Settled rows: 7.
-- ROI is not usable.
-- CLV is the correct primary gate until settlement volume is much larger.
+- Settled rows: 289 overall.
+- VALUE-tier settled rows: 69.
+- Overall paper ROI is -0.93%.
+- VALUE-only ROI is +16.2%; VALUE MATCH_RESULT ROI is +21.7%.
+- CONTROL ROI is -5.7%.
+- ROI is not decision-grade until VALUE settled rows approach 200.
+- CLV remains the primary gate until VALUE settlement volume is much larger.
 
 ### Staking
 
@@ -312,7 +329,7 @@ Current state:
 
 Why only medium:
 
-- VALUE CLV is 106, below the 200 checkpoint.
+- VALUE CLV is 122, below the 200 checkpoint.
 - VALUE rows are not all independent; analysis must account for event/selection
   clustering.
 - The model still has limited settled ROI evidence.
@@ -327,7 +344,7 @@ Why only medium:
 
 Why low:
 
-- ROI has only 7 settled rows.
+- ROI has only 69 VALUE-tier settled rows.
 - Staking lacks capital and liquidity evidence.
 - Live has zero market/training rows.
 - TOTALS is negative and low-sample.
@@ -345,10 +362,35 @@ Decision:
 
 Reason:
 
-- VALUE CLV is 106, below 200.
-- Settled rows are only 7.
+- VALUE CLV is below 200.
+- VALUE-tier settled rows are below 200.
 - Live training rows are zero.
 - Capital and liquidity are incomplete.
+
+### 2026-06-28: Keep ROI gated after settlement jump
+
+Decision:
+
+- Keep `ROI_SAMPLE_TOO_SMALL` gated on VALUE-tier settled rows, not total
+  settled rows.
+- Keep the project in RESEARCH_ONLY despite 289 total settled paper rows.
+- Do not enable staking or lower alert thresholds.
+
+Reason:
+
+- Total settled rows increased to 289, but VALUE-tier settled rows are 69.
+- Pure VALUE settled rows are 66; VALUE_CHECK adds 3 more to the VALUE-tier
+  diagnostic count.
+- The model being evaluated is the VALUE signal; CONTROL settlement volume
+  cannot make VALUE ROI statistically ready.
+- VALUE-only ROI is encouraging at +16.2%, and VALUE MATCH_RESULT ROI is
+  +21.7%, but the sample is still below the 200-row gate.
+
+Implementation note:
+
+- `profit-engine` now reports `paper.valueSettled`.
+- `ROI_SAMPLE_TOO_SMALL` now checks VALUE-tier settled rows rather than total
+  settled rows.
 
 ### 2026-06-28: Use The Odds API as primary research engine
 

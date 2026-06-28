@@ -33,6 +33,14 @@ function valueClvRows(rows) {
     optionalNumber(row.clv) !== null);
 }
 
+function isSettled(row) {
+  return ["WON", "LOST", "PUSH", "HALF_WON", "HALF_LOST"].includes(String(row.status ?? ""));
+}
+
+function valueSettledRows(rows) {
+  return rows.filter((row) => VALUE_TIERS.has(String(row.tier ?? "")) && isSettled(row));
+}
+
 function controlClvRows(rows) {
   return rows.filter((row) =>
     String(row.tier ?? "") === "CONTROL" &&
@@ -101,9 +109,9 @@ export function summarizeLiveEfficiency({
   };
 }
 
-function readiness({ valueCaptured, settled, live, warnings }) {
+function readiness({ valueCaptured, valueSettled, live, warnings }) {
   if (valueCaptured < 200) return "RESEARCH_ONLY";
-  if (settled < 200) return "CLV_READY_ROI_NOT_READY";
+  if (valueSettled < 200) return "CLV_READY_ROI_NOT_READY";
   if (live.trainingRows === 0) return "PREMATCH_ONLY_READY_LIVE_NOT_READY";
   if (warnings.includes("LIMITS_LIQUIDITY_NOT_MEASURED")) return "PAPER_READY_LIMITS_UNKNOWN";
   return "READY_FOR_TINY_STAKES";
@@ -139,6 +147,7 @@ export function buildProfitEngineReport({
     liveAuditRows,
     lifetimeRows,
   });
+  const valueSettled = valueSettledRows(paperRows).length;
 
   const configuredBankroll = optionalNumber(bankroll);
   const configuredMaxStake = optionalNumber(maxStake);
@@ -153,7 +162,7 @@ export function buildProfitEngineReport({
   const warnings = [];
   const valueCaptured = overallResearch?.valueClvCaptured ?? 0;
   if (valueCaptured < 200) warnings.push("VALUE_CLV_BELOW_200");
-  if (paperSummary.settled < 200) warnings.push("ROI_SAMPLE_TOO_SMALL");
+  if (valueSettled < 200) warnings.push("ROI_SAMPLE_TOO_SMALL");
   if (live.feedStatsRows > 0 && live.marketMessageRows === 0) {
     warnings.push("LIVE_FEED_HAS_NO_MARKET_MESSAGES");
   }
@@ -176,7 +185,7 @@ export function buildProfitEngineReport({
       : null,
     readiness: readiness({
       valueCaptured,
-      settled: paperSummary.settled,
+      valueSettled,
       live,
       warnings,
     }),
@@ -191,6 +200,7 @@ export function buildProfitEngineReport({
       settledStake: paperSummary.settledStake,
       profit: paperSummary.profit,
       roi: paperSummary.roi,
+      valueSettled,
       valueClvCaptured: overallResearch?.valueClvCaptured ?? 0,
       mainValueClvCaptured: mainResearch?.valueClvCaptured ?? 0,
       valuePending: overallResearch?.valuePending ?? 0,

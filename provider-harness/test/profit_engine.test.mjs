@@ -97,3 +97,33 @@ test("profit engine treats live maxBet rows as liquidity evidence", () => {
   assert.equal(report.live.averageMaxBet, 250);
   assert.equal(report.warnings.includes("LIMITS_LIQUIDITY_NOT_MEASURED"), false);
 });
+
+test("profit engine keeps ROI gated when total settled is high but VALUE settled is thin", () => {
+  const paperRows = [];
+  for (let index = 0; index < 220; index += 1) {
+    paperRows.push(paperRow({
+      referenceEventId: `control-${index}`,
+      tier: "CONTROL",
+      ev: "-0.020000",
+      clv: "-0.010000",
+      status: index % 2 === 0 ? "WON" : "LOST",
+      profit: index % 2 === 0 ? "0.8000" : "-1.0000",
+    }));
+  }
+  for (let index = 0; index < 66; index += 1) {
+    paperRows.push(paperRow({
+      referenceEventId: `value-${index}`,
+      tier: "VALUE",
+      ev: "0.030000",
+      clv: "0.020000",
+      status: index % 2 === 0 ? "WON" : "LOST",
+      profit: index % 2 === 0 ? "1.2000" : "-1.0000",
+    }));
+  }
+
+  const report = buildProfitEngineReport({ paperRows });
+
+  assert.equal(report.paper.settled, 286);
+  assert.equal(report.paper.valueSettled, 66);
+  assert.equal(report.warnings.includes("ROI_SAMPLE_TOO_SMALL"), true);
+});
