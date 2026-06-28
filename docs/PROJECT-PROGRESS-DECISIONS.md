@@ -636,6 +636,47 @@ Interpretation:
 - It is still not a staking system and should not be treated as calibrated EV
   until the profitability and calibration gates pass.
 
+### 2026-06-28: Additional bounded historical h2h spend before reset
+
+Decision:
+
+- Run one more h2h-only multi-snapshot historical calibration block.
+- Use the more recent non-overlapping window `2026-03-01..2026-06-28`.
+- Limit to BL1 and PD, snapshots `24h,6h,1h,10m`.
+- Cap spend at 3500 credits and keep the 2000-credit reserve intact.
+
+Reason:
+
+- The reset is near, so expiring credits should improve the reference model if
+  the spend is bounded.
+- More recent 2026 matches are more relevant to current market behavior than
+  older season slices.
+- Historical still does not include Stoiximan/Novibet, so the purpose remains
+  fair-probability calibration, not soft-book backtesting.
+
+Result:
+
+- `reports/historical-calibration-2026-06-28T18-58-31.831Z.json/csv`.
+- 3500 credits spent.
+- Quota remaining after run: 4422.
+- 100 matches pulled.
+- 88 calibrated events.
+- Stopped by credit cap, not by reserve.
+- Validation beat baseline:
+  - `consensus_power_median`: Brier 0.6150 vs baseline 0.6579, logLoss 1.0234
+    vs baseline 1.0881.
+  - `power`: Brier 0.6136 vs baseline 0.6584, logLoss 1.0221 vs baseline
+    1.0893.
+
+Interpretation:
+
+- The reference probability engine continues to beat naive baseline on
+  historical h2h calibration.
+- This supports using The Odds API fair probabilities as a research anchor, but
+  it still does not approve Telegram alerts as staking signals.
+- No further large historical pull should run unless quota remains comfortably
+  above the reserve close to reset.
+
 ## Next Gates
 
 Do not move beyond RESEARCH_ONLY until these gates are met:
