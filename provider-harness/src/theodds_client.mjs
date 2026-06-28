@@ -63,6 +63,14 @@ export function createTheOddsApiClient({
     }) {
       return request(`/sports/${sportKey}/events/${eventId}/odds`, { regions, markets, oddsFormat });
     },
+    getEventMarkets({
+      sportKey,
+      eventId,
+      regions = "eu",
+      dateFormat = "iso",
+    }) {
+      return request(`/sports/${sportKey}/events/${eventId}/markets`, { regions, dateFormat });
+    },
     getHistoricalOdds({
       sportKey,
       date,
@@ -71,6 +79,37 @@ export function createTheOddsApiClient({
       oddsFormat = "decimal",
     }) {
       return request(`/historical/sports/${sportKey}/odds`, { date, regions, markets, oddsFormat });
+    },
+    getHistoricalEvents({
+      sportKey,
+      date,
+      dateFormat = "iso",
+      eventIds,
+      commenceTimeFrom,
+      commenceTimeTo,
+    }) {
+      const parameters = { date, dateFormat };
+      if (eventIds?.length) parameters.eventIds = eventIds.join(",");
+      if (commenceTimeFrom) parameters.commenceTimeFrom = commenceTimeFrom;
+      if (commenceTimeTo) parameters.commenceTimeTo = commenceTimeTo;
+      return request(`/historical/sports/${sportKey}/events`, parameters);
+    },
+    getHistoricalEventOdds({
+      sportKey,
+      eventId,
+      date,
+      regions = "eu",
+      markets = "h2h",
+      dateFormat = "iso",
+      oddsFormat = "decimal",
+    }) {
+      return request(`/historical/sports/${sportKey}/events/${eventId}/odds`, {
+        date,
+        regions,
+        markets,
+        dateFormat,
+        oddsFormat,
+      });
     },
     getScores({ sportKey, daysFrom = 3, dateFormat = "iso" }) {
       return request(`/sports/${sportKey}/scores`, { daysFrom, dateFormat });

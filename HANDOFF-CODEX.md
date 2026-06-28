@@ -34,6 +34,30 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-28 (API-grounded live + calibration reliability).**
+> Implemented the official-docs-driven reliability layer. New Odds-API.io
+> diagnostics: `node src/cli.mjs live-preflight --sport=football
+> --bookmakers=Stoiximan,Novibet --markets=ML,Totals --max-events=50`
+> writes `reports/live-preflight.{csv,json}` plus
+> `reports/live-preflight-eventIds.txt`; it reads selected bookmakers, live
+> events, `/odds/multi?includeSeq=true`, and never loads The Odds API. Live
+> WebSocket startup now defaults to event IDs from that preflight file, uses a
+> `reports/live-shadow.lock.json` PID guard, primes `lastSeq` from REST
+> `/odds/multi` snapshots, and refreshes REST state on `resync_required`.
+> Broad live mode now requires explicit `--allow-broad-live`. Fallback command
+> `node src/cli.mjs live-updated-poll` reads Odds-API.io `/odds/updated` and
+> writes diagnostic `LIVE_UNCONFIRMED` training rows only when market rows exist;
+> it does not pretend to be confirmed EV evidence. New The Odds API coverage
+> command: `node src/cli.mjs market-availability --sports=... --markets=...
+> --max-credits=100`, writing reason buckets (`NO_EVENT`, `NO_MARKET`,
+> `TOO_FEW_BOOKS`, `MARKET_AVAILABLE`). Historical calibration now supports
+> `--multi-snapshot --markets=h2h --snapshots=24h,6h,1h,10m
+> --leagues=BL1,SA,PD --max-events-per-league=50 --max-credits=8000
+> --reserve-credits=2000`; it resolves historical event IDs first, then calls
+> historical event odds, h2h-only. Verification: full `npm test` **265/265**.
+> `--reserve-credits` is an active stop condition: the historical run stops once
+> observed quota remaining reaches the reserve, not merely a report field.
+>
 > **Status update 2026-06-28 (live/profit-engine audit).**
 > Added offline `node src/cli.mjs profit-engine`, writing
 > `reports/profit-engine-report.csv` and `.json`. It combines paper ROI,

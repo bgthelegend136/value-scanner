@@ -73,6 +73,27 @@ const THEODDS_SWEEP_COVERAGE_COLUMNS = [
   "noValueCandidates", "tooFewBooksCandidates", "reason",
 ];
 const SOCCER_CORE_COVERAGE_MARKETS = ["MATCH_RESULT", "DRAW_NO_BET", "BTTS", "DOUBLE_CHANCE"];
+const LIVE_PREFLIGHT_COLUMNS = [
+  "eventId", "home", "away", "status", "bookmakerCount",
+  "snapshotRows", "markets", "maxSeq", "reason",
+];
+const LIVE_FEED_STATS_COLUMNS = [
+  "observedAt", "messageType", "seq", "providerEventId", "bookmaker",
+  "markets", "auditRows", "trainingRows", "closedRows", "rejectionReasons",
+];
+const LIVE_TRAINING_COLUMNS = [
+  "observedAt", "seq", "providerEventId", "referenceEventId", "sportKey",
+  "liveStatus", "homeScore", "awayScore",
+  "bookmaker", "match", "market", "line", "outcome", "offeredOdds",
+  "maxBet",
+  "pinnacleFairProbability", "pinnacleFairOdds", "pinnacleEv",
+  "consensusFairProbability", "consensusFairOdds", "consensusEv", "consensusBooks",
+  "minimumConfirmedEv", "edgeOverDispersion",
+  "sampleTier", "confirmationStatus", "rejectionReason",
+];
+const MARKET_AVAILABILITY_COLUMNS = [
+  "sportKey", "eventId", "market", "bookCount", "books", "reason", "creditsSpent",
+];
 const MATCH_RESULT_PICK = { "1": "Home (1)", X: "Draw (X)", "2": "Away (2)" };
 
 const CANONICAL_COLUMNS = [
@@ -210,6 +231,338 @@ async function runEvents({ loadApiKey, createClient, out }) {
   }
   lines.push(formatRateLimit(rateLimit));
   out(`${lines.join("\n")}\n`);
+  return 0;
+}
+
+function bookmakerName(value) {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object") {
+    return String(value.name ?? value.title ?? value.key ?? value.bookmaker ?? "").trim();
+  }
+  return "";
+}
+
+function selectedBookmakerNames(payload) {
+  const source = Array.isArray(payload)
+    ? payload
+    : payload?.bookmakers ?? payload?.selected ?? payload?.data ?? Object.values(payload ?? {});
+  const candidates = Array.isArray(source) ? source : Object.values(source ?? {});
+  return [...new Set(candidates
+    .map(bookmakerName)
+    .filter(Boolean))];
+}
+
+function canonicalLiveMarket(value) {
+  const name = String(value ?? "").trim().toLowerCase();
+  if (["ml", "moneyline", "match_result", "match result", "h2h"].includes(name)) return "MATCH_RESULT";
+  if (["totals", "total"].includes(name)) return "TOTALS";
+  if (["btts", "both teams to score"].includes(name)) return "BTTS";
+  if (["double_chance", "double chance"].includes(name)) return "DOUBLE_CHANCE";
+  return name.toUpperCase();
+}
+
+function countReasons(rows) {
+  const counts = {};
+  for (const row of rows) counts[row.reason] = (counts[row.reason] ?? 0) + 1;
+  return counts;
+}
+
+async function runLivePreflight({ args, loadApiKey, createClient, out, reportsDir, now }) {
+  const sport = optionValue(args, "sport", "football");
+  const requestedBookmakers = splitArg(args, "bookmakers");
+  const bookmakers = requestedBookmakers.length ? requestedBookmakers : TARGET_BOOKMAKERS;
+  const requestedMarkets = new Set(
+    String(optionValue(args, "markets", "ML"))
+      .split(",")
+      .map(canonicalLiveMarket)
+      .filter(Boolean),
+  );
+  const maxEvents = Math.max(0, Math.floor(numericArg(args, "max-events", 50)));
+  const client = createClient({ apiKey: await loadApiKey() });
+
+  const selectedResponse = await client.listSelectedBookmakers();
+  const selectedBookmakers = selectedBookmakerNames(selectedResponse.data);
+  const selectedSet = new Set(selectedBookmakers.map((name) => name.toLowerCase()));
+  const selectedBookmakersVisible = bookmakers.every((name) => selectedSet.has(name.toLowerCase()));
+
+  const liveResponse = await client.listLiveEvents({ sport });
+  const liveEvents = (liveResponse.data ?? []).slice(0, maxEvents);
+  const rowsByEvent = new Map(liveEvents.map((event) => [String(event.id), {
+    eventId: String(event.id),
+    home: event.home ?? "",
+    away: event.away ?? "",
+    status: event.status ?? "",
+    bookmakerCount: String(event.bookmakerCount ?? ""),
+    snapshotRows: "0",
+    markets: "",
+    maxSeq: "",
+    reason: "NO_MARKET",
+  }]));
+  let maxSeq = null;
+
+  for (let index = 0; index < liveEvents.length; index += 10) {
+    const chunk = liveEvents.slice(index, index + 10);
+    const response = await client.getOddsMulti({
+      eventIds: chunk.map((event) => String(event.id)),
+      bookmakers,
+      includeSeq: true,
+    });
+    if (Number.isFinite(response.seq)) maxSeq = Math.max(maxSeq ?? 0, response.seq);
+    for (const event of response.data ?? []) {
+      const eventId = String(event.id);
+      const normalized = normalizeOddsResponse(event, response.receivedAt);
+      const filtered = normalized.filter((row) =>
+        bookmakers.includes(row.bookmaker) && requestedMarkets.has(row.market),
+      );
+      const markets = [...new Set(filtered.map((row) => row.market))].sort();
+      const existing = rowsByEvent.get(eventId) ?? {
+        eventId,
+        home: event.home ?? "",
+        away: event.away ?? "",
+        status: event.status ?? "",
+        bookmakerCount: String(event.bookmakerCount ?? ""),
+      };
+      rowsByEvent.set(eventId, {
+        ...existing,
+        snapshotRows: String(filtered.length),
+        markets: markets.join("|"),
+        maxSeq: Number.isFinite(response.seq) ? String(response.seq) : "",
+        reason: filtered.length > 0 ? "MARKET_AVAILABLE" : "NO_MARKET",
+      });
+    }
+  }
+
+  const rows = liveEvents.length
+    ? [...rowsByEvent.values()]
+    : [{
+      eventId: "",
+      home: "",
+      away: "",
+      status: "",
+      bookmakerCount: "",
+      snapshotRows: "0",
+      markets: "",
+      maxSeq: "",
+      reason: "NO_LIVE_EVENTS",
+    }];
+  const usableEventIds = rows
+    .filter((row) => row.reason === "MARKET_AVAILABLE")
+    .map((row) => row.eventId);
+  const summary = {
+    generatedAt: now().toISOString(),
+    sport,
+    requestedBookmakers: bookmakers,
+    selectedBookmakers,
+    selectedBookmakersVisible,
+    liveEventCount: liveEvents.length,
+    snapshotEventCount: rows.filter((row) => row.eventId).length,
+    usableEventCount: usableEventIds.length,
+    maxSeq,
+    reasons: countReasons(rows),
+  };
+
+  await writeCsv(join(reportsDir, "live-preflight.csv"), rows, LIVE_PREFLIGHT_COLUMNS);
+  await writeFile(
+    join(reportsDir, "live-preflight.json"),
+    `${JSON.stringify({ summary, usableEventIds, events: rows }, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(join(reportsDir, "live-preflight-eventIds.txt"), `${usableEventIds.join("\n")}${usableEventIds.length ? "\n" : ""}`, "utf8");
+
+  out(`Live preflight: usableEvents=${usableEventIds.length}, liveEvents=${liveEvents.length}, selectedBookmakersVisible=${selectedBookmakersVisible ? "yes" : "no"}, maxSeq=${maxSeq ?? "none"}.\n`);
+  out("Wrote live-preflight.csv, live-preflight.json, and live-preflight-eventIds.txt\n");
+  return 0;
+}
+
+function marketFilterFromArg(value) {
+  return new Set(String(value ?? "ML")
+    .split(",")
+    .map(canonicalLiveMarket)
+    .filter(Boolean));
+}
+
+function liveUpdatedTrainingRow(row, observedAt) {
+  return {
+    observedAt,
+    seq: "",
+    providerEventId: row.eventId,
+    referenceEventId: "",
+    sportKey: "",
+    liveStatus: "",
+    homeScore: "",
+    awayScore: "",
+    bookmaker: row.bookmaker,
+    match: `${row.homeTeam} - ${row.awayTeam}`,
+    market: row.market,
+    line: row.line,
+    outcome: row.outcome,
+    offeredOdds: Number(row.decimalOdds).toFixed(4),
+    maxBet: "",
+    pinnacleFairProbability: "",
+    pinnacleFairOdds: "",
+    pinnacleEv: "",
+    consensusFairProbability: "",
+    consensusFairOdds: "",
+    consensusEv: "",
+    consensusBooks: "",
+    minimumConfirmedEv: "",
+    edgeOverDispersion: "",
+    sampleTier: "LIVE_UNCONFIRMED",
+    confirmationStatus: "UNCONFIRMED",
+    rejectionReason: "",
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => { setTimeout(resolveSleep, ms); });
+}
+
+async function runLiveUpdatedPoll({ args, loadApiKey, createClient, out, reportsDir, now }) {
+  const sport = optionValue(args, "sport", "Football");
+  const bookmakers = splitArg(args, "bookmakers");
+  const targetBookmakers = bookmakers.length ? bookmakers : TARGET_BOOKMAKERS;
+  const intervalMs = Math.max(1, numericArg(args, "interval-seconds", 45)) * 1000;
+  const durationMs = Math.max(0, numericArg(args, "duration-minutes", 30)) * 60_000;
+  const marketFilter = marketFilterFromArg(optionValue(args, "markets", "ML"));
+  const client = createClient({ apiKey: await loadApiKey() });
+  const feedRows = [];
+  const trainingRows = [];
+  const stopAt = Date.now() + durationMs;
+
+  do {
+    const since = Math.floor((now().getTime() - 55_000) / 1000);
+    for (const bookmaker of targetBookmakers) {
+      const response = await client.getOddsUpdated({ since, bookmaker, sport });
+      for (const event of response.data ?? []) {
+        const observedAt = response.receivedAt ?? now().toISOString();
+        const normalized = normalizeOddsResponse(event, observedAt).filter((row) =>
+          row.bookmaker === bookmaker && marketFilter.has(row.market),
+        );
+        if (normalized.length === 0) continue;
+        const markets = [...new Set(normalized.map((row) => row.market))].sort();
+        feedRows.push({
+          observedAt,
+          messageType: "updated_poll",
+          seq: "",
+          providerEventId: String(event.id ?? ""),
+          bookmaker,
+          markets: markets.join("|"),
+          auditRows: "0",
+          trainingRows: String(normalized.length),
+          closedRows: "0",
+          rejectionReasons: "",
+        });
+        trainingRows.push(...normalized.map((row) => liveUpdatedTrainingRow(row, observedAt)));
+      }
+    }
+    if (durationMs === 0 || Date.now() >= stopAt) break;
+    await sleep(Math.min(intervalMs, Math.max(1, stopAt - Date.now())));
+  } while (Date.now() < stopAt);
+
+  await writeCsv(join(reportsDir, "ws-live-feed-stats.csv"), feedRows, LIVE_FEED_STATS_COLUMNS);
+  await writeCsv(join(reportsDir, "live-training-observations.csv"), trainingRows, LIVE_TRAINING_COLUMNS);
+  out(`Live updated poll: feedRows=${feedRows.length}, trainingRows=${trainingRows.length}, bookmakers=${targetBookmakers.join(",")}.\n`);
+  return 0;
+}
+
+function bookmakerMarketEntries(payload) {
+  if (Array.isArray(payload)) return payload;
+  return Object.entries(payload ?? {}).map(([key, value]) => ({
+    key,
+    markets: Array.isArray(value) ? value : value?.markets,
+  }));
+}
+
+function marketKey(value) {
+  if (typeof value === "string") return value;
+  return String(value?.key ?? value?.name ?? "").trim();
+}
+
+function marketAvailabilityBooks(payload) {
+  const byMarket = new Map();
+  for (const entry of bookmakerMarketEntries(payload)) {
+    const bookmaker = String(entry.key ?? entry.title ?? entry.name ?? entry.bookmaker ?? "").trim();
+    if (!bookmaker) continue;
+    for (const market of entry.markets ?? []) {
+      const key = marketKey(market);
+      if (!key) continue;
+      if (!byMarket.has(key)) byMarket.set(key, new Set());
+      byMarket.get(key).add(bookmaker);
+    }
+  }
+  return byMarket;
+}
+
+async function runMarketAvailability({ args, loadTheOddsKey, createTheOddsClient, out, reportsDir, now }) {
+  const sports = splitArg(args, "sports");
+  const sportKeys = sports.length ? sports : ["soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_italy_serie_a"];
+  const markets = splitArg(args, "markets");
+  const marketKeys = markets.length ? markets : ["btts", "draw_no_bet", "double_chance", "totals"];
+  const regions = optionValue(args, "regions", "eu");
+  const eventLimit = Math.max(0, Math.floor(numericArg(args, "event-limit", 20)));
+  const maxCredits = Math.min(100, Math.max(0, Math.floor(numericArg(args, "max-credits", 100))));
+  const minBooks = Math.max(1, Math.floor(numericArg(args, "min-books", 3)));
+  const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
+  const rows = [];
+  let creditsSpent = 0;
+  let stoppedByCreditCap = false;
+
+  for (const sportKey of sportKeys) {
+    const eventsResponse = await client.listEvents({ sportKey });
+    const events = (eventsResponse.data ?? []).slice(0, eventLimit);
+    if (events.length === 0) {
+      for (const market of marketKeys) {
+        rows.push({ sportKey, eventId: "", market, bookCount: "0", books: "", reason: "NO_EVENT", creditsSpent: String(creditsSpent) });
+      }
+      continue;
+    }
+    for (const event of events) {
+      if (creditsSpent + 1 > maxCredits) {
+        stoppedByCreditCap = true;
+        break;
+      }
+      const response = await client.getEventMarkets({ sportKey, eventId: event.id, regions });
+      creditsSpent += Number(response.quota?.lastCost ?? 1) || 1;
+      const byMarket = marketAvailabilityBooks(response.data ?? []);
+      for (const market of marketKeys) {
+        const books = [...(byMarket.get(market) ?? new Set())].sort();
+        const reason = books.length === 0
+          ? "NO_MARKET"
+          : books.length < minBooks
+            ? "TOO_FEW_BOOKS"
+            : "MARKET_AVAILABLE";
+        rows.push({
+          sportKey,
+          eventId: String(event.id ?? ""),
+          market,
+          bookCount: String(books.length),
+          books: books.join("|"),
+          reason,
+          creditsSpent: String(creditsSpent),
+        });
+      }
+    }
+    if (stoppedByCreditCap) break;
+  }
+
+  const summary = {
+    generatedAt: now().toISOString(),
+    sports: sportKeys,
+    markets: marketKeys,
+    regions,
+    minBooks,
+    maxCredits,
+    creditsSpent,
+    stoppedByCreditCap,
+    reasons: countReasons(rows),
+  };
+  await writeCsv(join(reportsDir, "market-availability.csv"), rows, MARKET_AVAILABILITY_COLUMNS);
+  await writeFile(
+    join(reportsDir, "market-availability.json"),
+    `${JSON.stringify({ summary, rows }, null, 2)}\n`,
+    "utf8",
+  );
+  out(`Market availability: rows=${rows.length}, creditsSpent=${creditsSpent}, stoppedByCreditCap=${stoppedByCreditCap ? "yes" : "no"}.\n`);
   return 0;
 }
 
@@ -1900,6 +2253,26 @@ export async function runCli(argv, deps = {}) {
       }
       return await runCapture(eventId, { loadApiKey, createClient, out, reportsDir, now });
     }
+    if (command === "live-preflight") {
+      return await runLivePreflight({
+        args: rest,
+        loadApiKey,
+        createClient,
+        out,
+        reportsDir,
+        now,
+      });
+    }
+    if (command === "live-updated-poll") {
+      return await runLiveUpdatedPoll({
+        args: rest,
+        loadApiKey,
+        createClient,
+        out,
+        reportsDir,
+        now,
+      });
+    }
     if (command === "scan") {
       const edgeArg = rest.find((a) => a.startsWith("--edge="));
       const parsed = edgeArg ? Number(edgeArg.split("=")[1]) / 100 : 0.02;
@@ -1928,6 +2301,16 @@ export async function runCli(argv, deps = {}) {
     }
     if (command === "theodds-sweep") {
       return await runTheOddsSweep({
+        args: rest,
+        loadTheOddsKey,
+        createTheOddsClient,
+        out,
+        reportsDir,
+        now,
+      });
+    }
+    if (command === "market-availability") {
+      return await runMarketAvailability({
         args: rest,
         loadTheOddsKey,
         createTheOddsClient,
@@ -2065,7 +2448,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

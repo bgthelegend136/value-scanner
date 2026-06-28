@@ -21,6 +21,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPORTS_DIR = resolve(HERE, "..", "reports");
 const OUTCOMES = ["1", "X", "2"];
 const EPSILON = 1e-12;
+const FD_COMPETITION_SPORT_KEYS = new Map([
+  ["PD", "soccer_spain_la_liga"],
+  ["BL1", "soccer_germany_bundesliga"],
+  ["SA", "soccer_italy_serie_a"],
+  ["PL", "soccer_epl"],
+]);
 const CSV_COLUMNS = [
   "rowType", "method", "split", "events", "outcomeRows",
   "brier", "logLoss", "baselineBrier", "baselineLogLoss",
@@ -39,6 +45,13 @@ function hasFlag(argv, name) {
 function numericOption(argv, name, fallback) {
   const parsed = Number(option(argv, name, fallback));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function splitOption(argv, name) {
+  return String(option(argv, name, ""))
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function dateOnly(value) {
@@ -90,6 +103,20 @@ export function snapshotIsoForKickoff(kickoffUtc, minutesBefore = 5) {
   return new Date(new Date(kickoffUtc).getTime() - minutesBefore * 60_000)
     .toISOString()
     .replace(".000Z", "Z");
+}
+
+export function snapshotSpecsFromArg(value = "24h,6h,1h,10m") {
+  return String(value)
+    .split(",")
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    .map((label) => {
+      const match = label.match(/^(\d+)([hm])$/u);
+      if (!match) throw new Error(`Invalid snapshot label: ${label}`);
+      const amount = Number(match[1]);
+      const minutesBefore = match[2] === "h" ? amount * 60 : amount;
+      return { label, minutesBefore };
+    });
 }
 
 function fairMapToProbabilities(fairMap) {
@@ -217,6 +244,91 @@ export function findHistoricalEventForMatch(events, match) {
   );
   // Fail closed on ambiguity: only pair when exactly one snapshot event fits.
   return candidates.length === 1 ? candidates[0] : null;
+}
+
+function historicalList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+function historicalEventPayload(payload) {
+  if (Array.isArray(payload?.data)) return payload.data[0] ?? null;
+  if (payload?.data && typeof payload.data === "object") return payload.data;
+  return payload && typeof payload === "object" ? payload : null;
+}
+
+export async function collectHistoricalCalibrationRows({
+  matches,
+  oddsClient,
+  sportKey,
+  regions = "eu",
+  markets = "h2h",
+  snapshots = snapshotSpecsFromArg(),
+  maxCredits = 8000,
+  reserveCredits = 0,
+} = {}) {
+  const rows = [];
+  const eventIdCache = new Map();
+  let creditsSpent = 0;
+  let quotaRemaining = "?";
+  let stoppedByCreditCap = false;
+  let stoppedByReserve = false;
+
+  outer:
+  for (const match of matches ?? []) {
+    for (const snapshot of snapshots) {
+      if (creditsSpent + 10 > maxCredits) {
+        stoppedByCreditCap = true;
+        break outer;
+      }
+      const date = snapshotIsoForKickoff(match.kickoffUtc, snapshot.minutesBefore);
+      const cacheKey = match.matchId ?? `${match.homeTeam}|${match.awayTeam}|${match.kickoffUtc}`;
+      if (!eventIdCache.has(cacheKey)) {
+        const eventsResponse = await oddsClient.getHistoricalEvents({ sportKey, date });
+        const event = findHistoricalEventForMatch(historicalList(eventsResponse.data), match);
+        eventIdCache.set(cacheKey, event?.id ? String(event.id) : "");
+      }
+      const eventId = eventIdCache.get(cacheKey);
+      if (!eventId) continue;
+      const oddsResponse = await oddsClient.getHistoricalEventOdds({
+        sportKey,
+        eventId,
+        date,
+        regions,
+        markets,
+      });
+      const lastCost = Number(oddsResponse.quota?.lastCost ?? 10) || 10;
+      creditsSpent += lastCost;
+      quotaRemaining = oddsResponse.quota?.remaining ?? quotaRemaining;
+      const eventPayload = historicalEventPayload(oddsResponse.data);
+      if (!eventPayload) continue;
+      rows.push(...predictionsForEvent(
+        eventPayload,
+        match,
+        oddsResponse.data?.timestamp ?? oddsResponse.receivedAt ?? date,
+        oddsResponse.data?.timestamp ?? date,
+      ).map((row) => ({
+        ...row,
+        snapshotLabel: snapshot.label,
+      })));
+      if (Number.isFinite(Number(quotaRemaining)) && Number(quotaRemaining) <= reserveCredits) {
+        stoppedByReserve = true;
+        break outer;
+      }
+    }
+  }
+
+  return {
+    rows,
+    meta: {
+      creditsSpent,
+      quotaRemaining,
+      stoppedByCreditCap,
+      stoppedByReserve,
+      snapshots: snapshots.map((snapshot) => snapshot.label),
+    },
+  };
 }
 
 function groupBy(items, keyFn) {
@@ -378,9 +490,18 @@ async function writeReports(report, reportsDir, stamp) {
 async function runHistoricalCalibration(argv = process.argv.slice(2)) {
   // football-data.org free returned usable 2025/26 rows for La Liga (PD) in
   // the 2026-06-27 preflight, while PL/ELC returned zero rows.
-  const sportKey = option(argv, "sport-key", "soccer_spain_la_liga");
-  const competition = option(argv, "competition", fdCompetitionFor(sportKey));
-  if (!competition) throw new Error(`No football-data.org competition mapping for ${sportKey}`);
+  const requestedLeagues = splitOption(argv, "leagues");
+  const defaultSportKey = option(argv, "sport-key", "soccer_spain_la_liga");
+  const defaultCompetition = option(argv, "competition", fdCompetitionFor(defaultSportKey));
+  const targets = requestedLeagues.length
+    ? requestedLeagues.map((competitionCode) => ({
+      competition: competitionCode,
+      sportKey: FD_COMPETITION_SPORT_KEYS.get(competitionCode) ?? defaultSportKey,
+    }))
+    : [{ sportKey: defaultSportKey, competition: defaultCompetition }];
+  for (const target of targets) {
+    if (!target.competition) throw new Error(`No football-data.org competition mapping for ${target.sportKey}`);
+  }
 
   const from = option(argv, "from", "2025-08-01");
   const to = option(argv, "to", "2025-12-31");
@@ -389,17 +510,25 @@ async function runHistoricalCalibration(argv = process.argv.slice(2)) {
   const snapshotMinutesBefore = numericOption(argv, "snapshot-minutes-before", 5);
   const bins = numericOption(argv, "bins", 10);
   const maxMatches = hasFlag(argv, "full") ? Number.POSITIVE_INFINITY : numericOption(argv, "max-matches", 5);
+  const maxCredits = numericOption(argv, "max-credits", 8000);
+  const reserveCredits = numericOption(argv, "reserve-credits", 2000);
   const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
 
   const envPath = await resolveEnvPath(process.cwd());
   const env = await loadEnvFile(envPath);
   const fdClient = createFootballDataClient({ apiKey: requireKey(env, "football_data_org_key") });
-  const fd = await fdClient.listFinishedMatches({ competition });
-  const matches = filterFinishedMatches(fd.matches, { from, to });
+  const targetMatches = [];
+  for (const target of targets) {
+    const fd = await fdClient.listFinishedMatches({ competition: target.competition });
+    const matches = filterFinishedMatches(fd.matches, { from, to });
+    targetMatches.push({ ...target, matches, requestsAvailableMinute: fd.requestsAvailableMinute });
+    console.log(`Outcome preflight: ${target.competition} ${from}..${to} returned ${matches.length} finished matches.`);
+    console.log(`football-data.org requests available this minute: ${fd.requestsAvailableMinute ?? "?"}`);
+  }
+  const primary = targetMatches[0];
+  const { sportKey, competition, matches } = primary;
 
-  console.log(`Outcome preflight: ${competition} ${from}..${to} returned ${matches.length} finished matches.`);
-  console.log(`football-data.org requests available this minute: ${fd.requestsAvailableMinute ?? "?"}`);
-  if (matches.length === 0) {
+  if (targetMatches.every((target) => target.matches.length === 0)) {
     console.log("No covered outcome window; pick a different league/season before spending historical credits.");
     return 1;
   }
@@ -411,6 +540,86 @@ async function runHistoricalCalibration(argv = process.argv.slice(2)) {
   }
 
   const oddsClient = createTheOddsApiClient({ apiKey: requireKey(env, "THE_ODDS_API_KEY") });
+  if (hasFlag(argv, "multi-snapshot")) {
+    const snapshots = snapshotSpecsFromArg(option(argv, "snapshots", "24h,6h,1h,10m"));
+    const maxEventsPerLeague = numericOption(argv, "max-events-per-league", maxMatches);
+    const allRows = [];
+    const perLeague = [];
+    if (markets !== "h2h") {
+      throw new Error("--multi-snapshot is h2h-only for this calibration gate");
+    }
+    console.log(
+      `Multi-snapshot historical calibration: leagues=${targetMatches.length}, ` +
+      `snapshots=${snapshots.map((snapshot) => snapshot.label).join(",")}, maxCredits=${maxCredits}, reserveCredits=${reserveCredits}.`,
+    );
+    let creditsRemainingForRun = maxCredits;
+    let stoppedByCreditCap = false;
+    let quotaRemaining = "?";
+    for (const target of targetMatches) {
+      const limitedMulti = target.matches.slice(0, maxEventsPerLeague);
+      const collected = await collectHistoricalCalibrationRows({
+        matches: limitedMulti,
+        oddsClient,
+        sportKey: target.sportKey,
+        regions,
+        markets,
+        snapshots,
+        maxCredits: creditsRemainingForRun,
+        reserveCredits,
+      });
+      creditsRemainingForRun -= collected.meta.creditsSpent;
+      stoppedByCreditCap = stoppedByCreditCap || collected.meta.stoppedByCreditCap;
+      const stoppedByReserve = collected.meta.stoppedByReserve;
+      quotaRemaining = collected.meta.quotaRemaining ?? quotaRemaining;
+      allRows.push(...collected.rows.map((row) => ({
+        ...row,
+        sportKey: target.sportKey,
+        competition: target.competition,
+      })));
+      perLeague.push({
+        sportKey: target.sportKey,
+        competition: target.competition,
+        matchesCoveredByOutcomes: target.matches.length,
+        matchesPulled: limitedMulti.length,
+        calibratedEvents: new Set(collected.rows.map((row) => row.eventId)).size,
+        creditsSpent: collected.meta.creditsSpent,
+        stoppedByCreditCap: collected.meta.stoppedByCreditCap,
+        stoppedByReserve,
+      });
+      if (creditsRemainingForRun <= 0 || stoppedByCreditCap || stoppedByReserve) break;
+    }
+    const creditsSpent = maxCredits - Math.max(0, creditsRemainingForRun);
+    const report = {
+      ...scoreCalibrationRows(allRows, { bins }),
+      meta: {
+        sportKey: targetMatches.map((target) => target.sportKey).join(","),
+        competition: targetMatches.map((target) => target.competition).join(","),
+        from,
+        to,
+        markets,
+        regions,
+        matchesCoveredByOutcomes: targetMatches.reduce((sum, target) => sum + target.matches.length, 0),
+        matchesPulled: perLeague.reduce((sum, target) => sum + target.matchesPulled, 0),
+        calibratedEvents: new Set(allRows.map((row) => row.eventId)).size,
+        quotaRemaining,
+        creditsSpent,
+        reserveCredits,
+        stoppedByCreditCap,
+        stoppedByReserve: perLeague.some((target) => target.stoppedByReserve),
+        snapshotLabels: snapshots.map((snapshot) => snapshot.label),
+        perLeague,
+        eventIdFirst: true,
+        notStrategyBacktest: true,
+      },
+    };
+    const stamp = new Date().toISOString().replaceAll(":", "-");
+    const { jsonPath, csvPath } = await writeReports(report, reportsDir, stamp);
+    console.log(`Wrote historical calibration JSON: ${jsonPath}`);
+    console.log(`Wrote historical calibration CSV: ${csvPath}`);
+    console.log(`The Odds API quota remaining: ${quotaRemaining}`);
+    return 0;
+  }
+
   const calibrationRows = [];
   let quotaRemaining = "?";
   for (const match of limited) {

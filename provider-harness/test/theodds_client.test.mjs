@@ -206,3 +206,56 @@ test("calls the historical odds endpoint and leaves wrapped data intact", async 
   assert.deepEqual(response.data, historicalPayload);
   assert.deepEqual(response.quota, { remaining: 19980, used: 20, lastCost: 20 });
 });
+
+test("calls event markets and historical event-id endpoints", async () => {
+  const urls = [];
+  const client = createTheOddsApiClient({
+    apiKey: "secret",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonResponse([], {
+        headers: {
+          "x-requests-remaining": "19877",
+          "x-requests-used": "123",
+          "x-requests-last": "1",
+        },
+      });
+    },
+  });
+
+  await client.getEventMarkets({
+    sportKey: "soccer_epl",
+    eventId: "evt-1",
+    regions: "eu",
+  });
+  await client.getHistoricalEvents({
+    sportKey: "soccer_epl",
+    date: "2025-08-16T12:00:00Z",
+    eventIds: ["evt-1", "evt-2"],
+    commenceTimeFrom: "2025-08-16T00:00:00Z",
+    commenceTimeTo: "2025-08-17T00:00:00Z",
+  });
+  await client.getHistoricalEventOdds({
+    sportKey: "soccer_epl",
+    eventId: "evt-1",
+    date: "2025-08-16T12:00:00Z",
+    regions: "eu",
+    markets: "h2h",
+  });
+
+  const marketsUrl = new URL(urls[0]);
+  assert.equal(marketsUrl.pathname, "/v4/sports/soccer_epl/events/evt-1/markets");
+  assert.equal(marketsUrl.searchParams.get("regions"), "eu");
+
+  const historicalEventsUrl = new URL(urls[1]);
+  assert.equal(historicalEventsUrl.pathname, "/v4/historical/sports/soccer_epl/events");
+  assert.equal(historicalEventsUrl.searchParams.get("date"), "2025-08-16T12:00:00Z");
+  assert.equal(historicalEventsUrl.searchParams.get("eventIds"), "evt-1,evt-2");
+  assert.equal(historicalEventsUrl.searchParams.get("commenceTimeFrom"), "2025-08-16T00:00:00Z");
+  assert.equal(historicalEventsUrl.searchParams.get("commenceTimeTo"), "2025-08-17T00:00:00Z");
+
+  const historicalEventOddsUrl = new URL(urls[2]);
+  assert.equal(historicalEventOddsUrl.pathname, "/v4/historical/sports/soccer_epl/events/evt-1/odds");
+  assert.equal(historicalEventOddsUrl.searchParams.get("date"), "2025-08-16T12:00:00Z");
+  assert.equal(historicalEventOddsUrl.searchParams.get("markets"), "h2h");
+});

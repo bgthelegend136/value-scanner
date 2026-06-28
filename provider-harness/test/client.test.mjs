@@ -116,3 +116,72 @@ test("getOddsMulti requests /odds/multi with comma-joined ids and bookmakers", a
   assert.equal(url.searchParams.get("eventIds"), "1,2,3");
   assert.equal(url.searchParams.get("bookmakers"), "Superbet,Stoiximan");
 });
+
+test("getOddsMulti can request includeSeq and returns the sequence header", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(String(url));
+    return jsonResponse([], { headers: { "x-oddsapi-seq": "482917" } });
+  };
+  const client = createOddsApiClient({ apiKey: "secret", fetchImpl });
+
+  const response = await client.getOddsMulti({
+    eventIds: ["1", "2"],
+    bookmakers: ["Stoiximan"],
+    includeSeq: true,
+  });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/v3/odds/multi");
+  assert.equal(url.searchParams.get("includeSeq"), "true");
+  assert.equal(response.seq, 482917);
+});
+
+test("calls selected bookmakers, live events, updated odds, and movements endpoints", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(String(url));
+    return jsonResponse([]);
+  };
+  const client = createOddsApiClient({ apiKey: "secret", fetchImpl });
+
+  await client.listSelectedBookmakers();
+  await client.listLiveEvents({ sport: "football" });
+  await client.listEvents({
+    sport: "football",
+    status: "pending,live",
+    from: "2026-06-28T00:00:00Z",
+    to: "2026-06-29T00:00:00Z",
+    bookmaker: "Stoiximan",
+    limit: 100,
+    skip: 50,
+  });
+  await client.getOddsUpdated({ since: 1_782_624_000, bookmaker: "Stoiximan", sport: "Football" });
+  await client.getOddsMovements({ eventId: "evt-1", bookmaker: "Stoiximan", market: "ML" });
+
+  assert.equal(new URL(urls[0]).pathname, "/v3/bookmakers/selected");
+
+  const liveUrl = new URL(urls[1]);
+  assert.equal(liveUrl.pathname, "/v3/events/live");
+  assert.equal(liveUrl.searchParams.get("sport"), "football");
+
+  const eventsUrl = new URL(urls[2]);
+  assert.equal(eventsUrl.pathname, "/v3/events");
+  assert.equal(eventsUrl.searchParams.get("from"), "2026-06-28T00:00:00Z");
+  assert.equal(eventsUrl.searchParams.get("to"), "2026-06-29T00:00:00Z");
+  assert.equal(eventsUrl.searchParams.get("bookmaker"), "Stoiximan");
+  assert.equal(eventsUrl.searchParams.get("skip"), "50");
+
+  const updatedUrl = new URL(urls[3]);
+  assert.equal(updatedUrl.pathname, "/v3/odds/updated");
+  assert.equal(updatedUrl.searchParams.get("since"), "1782624000");
+  assert.equal(updatedUrl.searchParams.get("bookmaker"), "Stoiximan");
+  assert.equal(updatedUrl.searchParams.get("sport"), "Football");
+
+  const movementsUrl = new URL(urls[4]);
+  assert.equal(movementsUrl.pathname, "/v3/odds/movements");
+  assert.equal(movementsUrl.searchParams.get("eventId"), "evt-1");
+  assert.equal(movementsUrl.searchParams.get("bookmaker"), "Stoiximan");
+  assert.equal(movementsUrl.searchParams.get("market"), "ML");
+  assert.equal(movementsUrl.searchParams.has("marketLine"), false);
+});

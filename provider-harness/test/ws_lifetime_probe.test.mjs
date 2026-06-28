@@ -7,16 +7,22 @@ import test from "node:test";
 import {
   applyLiveEventState,
   applyWsMessage,
+  acquireLiveShadowLock,
   buildWsUrl,
   createSerializedCsvAppender,
   createLifetimeState,
   evaluateStrictEvMessage,
   evaluateStrictEvMessageWithAudit,
+  eventIdsFromText,
+  handleResyncRequired,
   liveEventStatusPath,
   liveEventStatusRow,
   liveFeedStatsPath,
   liveFeedStatsRow,
   liveTrainingPath,
+  primeWsSeqFromRest,
+  resolveWsEventIds,
+  releaseLiveShadowLock,
   liveShadowAuditPath,
   targetBookmakersFromArgv,
   redactWsUrl,
@@ -204,6 +210,118 @@ test("target bookmaker option can widen measurement-only live training", () => {
     [...targetBookmakersFromArgv(["--target-bookmakers=Bet365,Unibet"])],
     ["Bet365", "Unibet"],
   );
+});
+
+test("eventIdsFromText caps websocket event ids at 50", () => {
+  const text = Array.from({ length: 55 }, (_, index) => `evt-${index}`).join("\n");
+  const ids = eventIdsFromText(text);
+
+  assert.equal(ids.length, 50);
+  assert.equal(ids[0], "evt-0");
+  assert.equal(ids[49], "evt-49");
+});
+
+test("resolveWsEventIds requires event ids unless broad live is explicitly allowed", () => {
+  assert.throws(
+    () => resolveWsEventIds({ argv: [], fileText: "" }),
+    /live preflight eventIds/u,
+  );
+  assert.deepEqual(
+    resolveWsEventIds({ argv: ["--allow-broad-live"], fileText: "" }),
+    [],
+  );
+  assert.deepEqual(
+    resolveWsEventIds({ argv: ["--eventIds=1,2"], fileText: "" }),
+    ["1", "2"],
+  );
+  assert.deepEqual(
+    resolveWsEventIds({ argv: ["--eventIds-file=reports/live-preflight-eventIds.txt"], fileText: "3\n4\n" }),
+    ["3", "4"],
+  );
+});
+
+test("live shadow lock refuses active pids and replaces stale locks", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "live-lock-"));
+  const lockPath = join(dir, "live-shadow.lock.json");
+  const now = new Date("2026-06-28T12:00:00Z");
+
+  const first = await acquireLiveShadowLock({
+    lockPath,
+    pid: 111,
+    now,
+    staleMinutes: 180,
+    pidExists: () => true,
+  });
+  assert.equal(first.acquired, true);
+
+  const active = await acquireLiveShadowLock({
+    lockPath,
+    pid: 222,
+    now: new Date("2026-06-28T12:10:00Z"),
+    staleMinutes: 180,
+    pidExists: () => true,
+  });
+  assert.equal(active.acquired, false);
+  assert.equal(active.reason, "ACTIVE_LOCK");
+
+  const stale = await acquireLiveShadowLock({
+    lockPath,
+    pid: 333,
+    now: new Date("2026-06-28T16:00:00Z"),
+    staleMinutes: 180,
+    pidExists: () => true,
+  });
+  assert.equal(stale.acquired, true);
+  await releaseLiveShadowLock(stale);
+});
+
+test("primeWsSeqFromRest snapshots event ids in chunks and stores the highest sequence", async () => {
+  const calls = [];
+  const state = createLifetimeState();
+  const client = {
+    async getOddsMulti(args) {
+      calls.push(args);
+      return { seq: calls.length === 1 ? 10 : 15, data: [] };
+    },
+  };
+  const eventIds = Array.from({ length: 12 }, (_, index) => String(index + 1));
+
+  const seq = await primeWsSeqFromRest({
+    client,
+    eventIds,
+    bookmakers: ["Stoiximan", "Novibet"],
+    state,
+  });
+
+  assert.equal(seq, 15);
+  assert.equal(state.lastSeq, 15);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], {
+    eventIds: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+    bookmakers: ["Stoiximan", "Novibet"],
+    includeSeq: true,
+  });
+});
+
+test("handleResyncRequired refreshes REST snapshot when the websocket asks for resync", async () => {
+  const state = createLifetimeState();
+  state.resyncRequired = { type: "resync_required", reason: "replay_limit_exceeded" };
+  const client = {
+    async getOddsMulti() {
+      return { seq: 91, data: [] };
+    },
+  };
+
+  const refreshed = await handleResyncRequired({
+    client,
+    eventIds: ["evt-1"],
+    bookmakers: ["Stoiximan"],
+    state,
+  });
+
+  assert.equal(refreshed, true);
+  assert.equal(state.lastSeq, 91);
+  assert.equal(state.resyncRequired, null);
 });
 
 test("legacy ws probe records a raw high-price lifecycle when an update falls below threshold", () => {

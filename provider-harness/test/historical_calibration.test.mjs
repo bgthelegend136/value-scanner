@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   calibrationCsvRows,
   clubNameMatches,
+  collectHistoricalCalibrationRows,
   filterFinishedMatches,
   findHistoricalEventForMatch,
   scoreCalibrationRows,
   snapshotIsoForKickoff,
+  snapshotSpecsFromArg,
 } from "../scripts/historical-calibration.mjs";
 
 function event(eventId, kickoffUtc, method, probabilities, actualOutcome) {
@@ -94,4 +96,147 @@ test("historical calibration CSV rows flatten validation metrics and reliability
   const rows = calibrationCsvRows(report);
   assert.ok(rows.some((row) => row.rowType === "summary" && row.method === "power"));
   assert.ok(rows.some((row) => row.rowType === "reliability" && row.method === "power"));
+});
+
+function historicalOddsEvent(id = "hist-1") {
+  const book = (key, home, draw, away) => ({
+    key,
+    title: key,
+    markets: [{
+      key: "h2h",
+      outcomes: [
+        { name: "Japan", price: home },
+        { name: "Sweden", price: away },
+        { name: "Draw", price: draw },
+      ],
+    }],
+  });
+  return {
+    id,
+    commence_time: "2025-08-16T15:00:00Z",
+    home_team: "Japan",
+    away_team: "Sweden",
+    bookmakers: [
+      book("pinnacle", 2.00, 3.40, 3.80),
+      book("betsson", 2.02, 3.35, 3.70),
+      book("unibet", 1.98, 3.45, 3.75),
+      book("williamhill", 2.01, 3.38, 3.72),
+    ],
+  };
+}
+
+test("multi-snapshot historical collection reuses historical event ids and labels snapshots", async () => {
+  const calls = [];
+  const matches = [{
+    matchId: "fd-1",
+    kickoffUtc: "2025-08-16T15:00:00Z",
+    homeTeam: "Japan",
+    awayTeam: "Sweden",
+    actualOutcome: "1",
+  }];
+  const oddsClient = {
+    async getHistoricalEvents(args) {
+      calls.push(["events", args]);
+      return { data: { data: [{ id: "hist-1", home_team: "Japan", away_team: "Sweden", commence_time: "2025-08-16T15:00:00Z" }] } };
+    },
+    async getHistoricalEventOdds(args) {
+      calls.push(["eventOdds", args]);
+      return {
+        data: { timestamp: args.date, data: historicalOddsEvent(args.eventId) },
+        receivedAt: args.date,
+        quota: { lastCost: 10, remaining: 19000 },
+      };
+    },
+  };
+
+  const result = await collectHistoricalCalibrationRows({
+    matches,
+    oddsClient,
+    sportKey: "soccer_spain_la_liga",
+    regions: "eu",
+    markets: "h2h",
+    snapshots: snapshotSpecsFromArg("24h,10m"),
+    maxCredits: 100,
+  });
+
+  assert.equal(calls.filter((call) => call[0] === "events").length, 1);
+  assert.deepEqual(
+    calls.filter((call) => call[0] === "eventOdds").map((call) => call[1].eventId),
+    ["hist-1", "hist-1"],
+  );
+  assert.deepEqual([...new Set(result.rows.map((row) => row.snapshotLabel))], ["24h", "10m"]);
+  assert.equal(result.meta.creditsSpent, 20);
+  assert.equal(result.meta.stoppedByCreditCap, false);
+});
+
+test("multi-snapshot historical collection stops before exceeding max credits", async () => {
+  let eventOddsCalls = 0;
+  const result = await collectHistoricalCalibrationRows({
+    matches: [{
+      matchId: "fd-1",
+      kickoffUtc: "2025-08-16T15:00:00Z",
+      homeTeam: "Japan",
+      awayTeam: "Sweden",
+      actualOutcome: "1",
+    }],
+    oddsClient: {
+      async getHistoricalEvents() {
+        return { data: { data: [{ id: "hist-1", home_team: "Japan", away_team: "Sweden", commence_time: "2025-08-16T15:00:00Z" }] } };
+      },
+      async getHistoricalEventOdds(args) {
+        eventOddsCalls += 1;
+        return {
+          data: { timestamp: args.date, data: historicalOddsEvent(args.eventId) },
+          receivedAt: args.date,
+          quota: { lastCost: 10, remaining: 19000 },
+        };
+      },
+    },
+    sportKey: "soccer_spain_la_liga",
+    regions: "eu",
+    markets: "h2h",
+    snapshots: snapshotSpecsFromArg("24h,10m"),
+    maxCredits: 10,
+  });
+
+  assert.equal(eventOddsCalls, 1);
+  assert.equal(result.meta.creditsSpent, 10);
+  assert.equal(result.meta.stoppedByCreditCap, true);
+  assert.equal(result.rows.every((row) => row.market === undefined), true);
+});
+
+test("multi-snapshot historical collection stops when the quota reserve is reached", async () => {
+  let eventOddsCalls = 0;
+  const result = await collectHistoricalCalibrationRows({
+    matches: [{
+      matchId: "fd-1",
+      kickoffUtc: "2025-08-16T15:00:00Z",
+      homeTeam: "Japan",
+      awayTeam: "Sweden",
+      actualOutcome: "1",
+    }],
+    oddsClient: {
+      async getHistoricalEvents() {
+        return { data: { data: [{ id: "hist-1", home_team: "Japan", away_team: "Sweden", commence_time: "2025-08-16T15:00:00Z" }] } };
+      },
+      async getHistoricalEventOdds(args) {
+        eventOddsCalls += 1;
+        return {
+          data: { timestamp: args.date, data: historicalOddsEvent(args.eventId) },
+          receivedAt: args.date,
+          quota: { lastCost: 10, remaining: 1999 },
+        };
+      },
+    },
+    sportKey: "soccer_spain_la_liga",
+    regions: "eu",
+    markets: "h2h",
+    snapshots: snapshotSpecsFromArg("24h,10m"),
+    maxCredits: 100,
+    reserveCredits: 2000,
+  });
+
+  assert.equal(eventOddsCalls, 1);
+  assert.equal(result.meta.quotaRemaining, 1999);
+  assert.equal(result.meta.stoppedByReserve, true);
 });

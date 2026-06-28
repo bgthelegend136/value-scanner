@@ -4,11 +4,12 @@
 // +EV under the same rule as Telegram alerts: Pinnacle fair probability plus
 // 3-book consensus EV must both clear the 10% floor. It sends no alerts.
 
-import { access, appendFile, mkdir } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveEnvPath } from "../src/cli.mjs";
+import { createOddsApiClient } from "../src/client.mjs";
 import { loadEnvFile, requireApiKey, requireKey } from "../src/env.mjs";
 import { confirmCandidate } from "../src/mispricing_confirm.mjs";
 import { matchCandidateEvent } from "../src/mispricing_match.mjs";
@@ -82,6 +83,90 @@ function splitOption(argv, name) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+export function eventIdsFromText(text, max = 50) {
+  return [...new Set(String(text ?? "")
+    .split(/[\s,]+/u)
+    .map((item) => item.trim())
+    .filter(Boolean))]
+    .slice(0, max);
+}
+
+export function resolveWsEventIds({ argv, fileText = "" }) {
+  const explicit = splitOption(argv, "eventIds");
+  if (explicit.length) return explicit.slice(0, 50);
+  const fromFile = eventIdsFromText(fileText);
+  if (fromFile.length) return fromFile;
+  if (hasFlag(argv, "allow-broad-live")) return [];
+  throw new Error("live preflight eventIds required; run live-preflight first or pass --allow-broad-live");
+}
+
+function processPidExists(pid) {
+  const numeric = Number(pid);
+  if (!Number.isInteger(numeric) || numeric <= 0) return false;
+  try {
+    process.kill(numeric, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readJsonIfPresent(path) {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export async function acquireLiveShadowLock({
+  lockPath,
+  pid = process.pid,
+  now = new Date(),
+  staleMinutes = 180,
+  pidExists = processPidExists,
+} = {}) {
+  const existing = await readJsonIfPresent(lockPath);
+  if (existing?.pid && existing?.startedAt) {
+    const ageMs = new Date(now).getTime() - new Date(existing.startedAt).getTime();
+    const stale = Number.isFinite(ageMs) && ageMs > staleMinutes * 60_000;
+    if (!stale && pidExists(existing.pid)) {
+      return { acquired: false, reason: "ACTIVE_LOCK", lockPath, existing };
+    }
+  }
+  await mkdir(dirname(lockPath), { recursive: true });
+  const lock = { pid, startedAt: new Date(now).toISOString(), lockPath };
+  await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+  return { acquired: true, reason: "ACQUIRED", lockPath, lock };
+}
+
+export async function releaseLiveShadowLock(handle) {
+  if (!handle?.acquired || !handle.lockPath) return;
+  await rm(handle.lockPath, { force: true });
+}
+
+export async function primeWsSeqFromRest({ client, eventIds, bookmakers, state }) {
+  if (!eventIds?.length || !bookmakers?.length) return state.lastSeq || null;
+  let maxSeq = null;
+  for (let index = 0; index < eventIds.length; index += 10) {
+    const response = await client.getOddsMulti({
+      eventIds: eventIds.slice(index, index + 10),
+      bookmakers,
+      includeSeq: true,
+    });
+    if (Number.isFinite(response.seq)) maxSeq = Math.max(maxSeq ?? 0, response.seq);
+  }
+  if (Number.isFinite(maxSeq)) state.lastSeq = maxSeq;
+  return maxSeq;
+}
+
+export async function handleResyncRequired({ client, eventIds, bookmakers, state }) {
+  if (!state.resyncRequired) return false;
+  await primeWsSeqFromRest({ client, eventIds, bookmakers, state });
+  state.resyncRequired = null;
+  return true;
 }
 
 export function targetBookmakersFromArgv(argv) {
@@ -864,6 +949,28 @@ async function runProbe(argv = process.argv.slice(2)) {
   const envPath = await resolveEnvPath(process.cwd());
   const env = await loadEnvFile(envPath);
   const apiKey = requireApiKey(env);
+  const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
+  const eventIdsFile = resolve(option(argv, "eventIds-file", join(reportsDir, "live-preflight-eventIds.txt")));
+  const explicitEventIds = option(argv, "eventIds", "");
+  const eventIdsFileText = explicitEventIds
+    ? ""
+    : await readFile(eventIdsFile, "utf8").catch(() => "");
+  const resolvedEventIds = resolveWsEventIds({ argv, fileText: eventIdsFileText });
+  let lockHandle = null;
+  if (hasFlag(argv, "lock")) {
+    lockHandle = await acquireLiveShadowLock({
+      lockPath: resolve(option(argv, "lock-path", join(reportsDir, "live-shadow.lock.json"))),
+      staleMinutes: numericOption(argv, "lock-stale-minutes", 180),
+      now: new Date(),
+    });
+    if (!lockHandle.acquired) {
+      console.error(`Live shadow already running (${lockHandle.reason}); lock=${lockHandle.lockPath}`);
+      return;
+    }
+  }
+  const restSnapshotBookmakers = splitOption(argv, "bookmakers");
+  const restBookmakers = restSnapshotBookmakers.length ? restSnapshotBookmakers : [...TARGET_BOOKMAKERS];
+  const oddsApiClient = createOddsApiClient({ apiKey });
   const referenceClient = createTheOddsApiClient({ apiKey: requireKey(env, "THE_ODDS_API_KEY") });
   const registry = await loadSportRegistry(DEFAULT_SPORT_MAP);
   const sportsResponse = await referenceClient.listSports();
@@ -873,7 +980,6 @@ async function runProbe(argv = process.argv.slice(2)) {
   const appendTrainingRows = createSerializedCsvAppender(LIVE_TRAINING_COLUMNS);
   const appendLiveStatusRows = createSerializedCsvAppender(LIVE_EVENT_STATUS_COLUMNS);
   const appendFeedStatsRows = createSerializedCsvAppender(LIVE_FEED_STATS_COLUMNS);
-  const reportsDir = resolve(option(argv, "reports-dir", DEFAULT_REPORTS_DIR));
   const outputPath = resolve(option(argv, "output", join(reportsDir, "ws-lifetime-log.csv")));
   const auditOutput = liveShadowAuditPath({ argv, reportsDir });
   const auditOutputPath = auditOutput ? resolve(auditOutput) : "";
@@ -904,14 +1010,29 @@ async function runProbe(argv = process.argv.slice(2)) {
   let reconnectAttempts = 0;
   let ws = null;
 
-  const connect = () => {
+  const connect = async () => {
+    if (state.resyncRequired) {
+      await handleResyncRequired({
+        client: oddsApiClient,
+        eventIds: resolvedEventIds,
+        bookmakers: restBookmakers,
+        state,
+      });
+    } else if (resolvedEventIds.length && !state.lastSeq) {
+      await primeWsSeqFromRest({
+        client: oddsApiClient,
+        eventIds: resolvedEventIds,
+        bookmakers: restBookmakers,
+        state,
+      });
+    }
     const url = buildWsUrl({
       apiKey,
       markets: option(argv, "markets", "ML"),
       channels: option(argv, "channels", "odds"),
-      sport: option(argv, "sport", "football"),
-      leagues: option(argv, "leagues"),
-      eventIds: option(argv, "eventIds"),
+      sport: resolvedEventIds.length ? "" : option(argv, "sport", "football"),
+      leagues: resolvedEventIds.length ? "" : option(argv, "leagues"),
+      eventIds: resolvedEventIds.length ? resolvedEventIds : "",
       status: option(argv, "status", "prematch"),
       lastSeq: state.lastSeq,
     });
@@ -974,15 +1095,16 @@ async function runProbe(argv = process.argv.slice(2)) {
     ws.onclose = () => {
       if (Date.now() >= stopAt) {
         console.log("WebSocket probe duration complete.");
+        void releaseLiveShadowLock(lockHandle);
         return;
       }
       reconnectAttempts += 1;
       const delay = Math.min(1000 * (2 ** reconnectAttempts), 30_000);
-      setTimeout(connect, delay);
+      setTimeout(() => { void connect(); }, delay);
     };
   };
 
-  connect();
+  void connect();
   setTimeout(() => ws?.close(), Math.max(1_000, stopAt - Date.now()));
 }
 
