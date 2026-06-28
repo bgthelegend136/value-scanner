@@ -1,0 +1,154 @@
+import {
+  average,
+  decimal,
+  evBucket,
+  hasClv,
+  isPrimaryMarket,
+  isSettled,
+  median,
+  optionalNumber,
+  oddsBucket,
+  tierGroup,
+  timeToCloseBucket,
+} from "./report_domain.mjs";
+
+export const CALIBRATION_REPORT_COLUMNS = [
+  "scope", "key", "count", "settled", "roi", "avgEv", "avgClv", "medianClv",
+  "clvBeatRate", "roiLower", "roiUpper", "clvLower", "clvUpper",
+  "probabilityRoiPositive", "probabilityClvPositive",
+];
+
+const EV_BUCKET_ORDER = ["<-5%", "-5..0%", "0..2%", "2..5%", "5..10%", "10%+"];
+
+function quantile(values, q) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1))));
+  return sorted[index];
+}
+
+function deterministicResamples(values, iterations = 200) {
+  if (values.length === 0) return [];
+  const out = [];
+  for (let i = 0; i < iterations; i += 1) {
+    let total = 0;
+    for (let j = 0; j < values.length; j += 1) {
+      total += values[(i * 17 + j * 31) % values.length];
+    }
+    out.push(total / values.length);
+  }
+  return out;
+}
+
+function confidence(values) {
+  if (values.length === 0) {
+    return { lower: null, upper: null, probabilityPositive: null };
+  }
+  const samples = deterministicResamples(values);
+  return {
+    lower: quantile(samples, 0.025),
+    upper: quantile(samples, 0.975),
+    probabilityPositive: samples.filter((value) => value > 0).length / samples.length,
+  };
+}
+
+function emptyBucket(scope, key) {
+  return { scope, key, rows: [], evs: [], clvs: [], returns: [], settled: 0, stake: 0, profit: 0 };
+}
+
+function addBucket(map, scope, key, row) {
+  const id = `${scope}|${key}`;
+  if (!map.has(id)) map.set(id, emptyBucket(scope, key));
+  const bucket = map.get(id);
+  bucket.rows.push(row);
+  const ev = optionalNumber(row.ev);
+  const clv = optionalNumber(row.clv);
+  if (ev !== null) bucket.evs.push(ev);
+  if (clv !== null) bucket.clvs.push(clv);
+  if (isSettled(row)) {
+    const stake = optionalNumber(row.stake) ?? 0;
+    const profit = optionalNumber(row.profit) ?? 0;
+    bucket.settled += 1;
+    bucket.stake += stake;
+    bucket.profit += profit;
+    if (stake > 0) bucket.returns.push(profit / stake);
+  }
+}
+
+function finishBucket(bucket) {
+  const roiConfidence = confidence(bucket.returns);
+  const clvConfidence = confidence(bucket.clvs);
+  return {
+    scope: bucket.scope,
+    key: bucket.key,
+    count: bucket.rows.length,
+    settled: bucket.settled,
+    roi: bucket.stake > 0 ? bucket.profit / bucket.stake : null,
+    avgEv: average(bucket.evs),
+    avgClv: average(bucket.clvs),
+    medianClv: median(bucket.clvs),
+    clvBeatRate: bucket.clvs.length > 0 ? bucket.clvs.filter((value) => value > 0).length / bucket.clvs.length : null,
+    roiLower: roiConfidence.lower,
+    roiUpper: roiConfidence.upper,
+    clvLower: clvConfidence.lower,
+    clvUpper: clvConfidence.upper,
+    probabilityRoiPositive: roiConfidence.probabilityPositive,
+    probabilityClvPositive: clvConfidence.probabilityPositive,
+  };
+}
+
+function monotonicity(rows) {
+  const evRows = rows
+    .filter((row) => row.scope === "evBucket" && row.avgClv !== null)
+    .sort((left, right) => EV_BUCKET_ORDER.indexOf(left.key) - EV_BUCKET_ORDER.indexOf(right.key));
+  let previous = null;
+  for (const row of evRows) {
+    if (previous !== null && row.avgClv + 0.005 < previous) {
+      return { status: "FAIL", reason: `${row.key} average CLV underperformed lower EV bucket` };
+    }
+    previous = row.avgClv;
+  }
+  return { status: "PASS", reason: "" };
+}
+
+export function buildCalibrationReport({ rows = [], generatedAt = new Date().toISOString() } = {}) {
+  const buckets = new Map();
+  for (const row of rows.filter(hasClv)) {
+    addBucket(buckets, "overall", "all", row);
+    addBucket(buckets, "tier", tierGroup(row), row);
+    addBucket(buckets, "market", row.market || "(blank)", row);
+    addBucket(buckets, "evBucket", evBucket(optionalNumber(row.ev)), row);
+    addBucket(buckets, "oddsBucket", oddsBucket(optionalNumber(row.decimalOdds)), row);
+    if (isPrimaryMarket(row)) addBucket(buckets, "primary", `MATCH_RESULT|${tierGroup(row)}`, row);
+    addBucket(buckets, "matchedControl", `${row.market || "(blank)"}|${oddsBucket(optionalNumber(row.decimalOdds))}|${timeToCloseBucket(row)}`, row);
+  }
+  const reportRows = [...buckets.values()].map(finishBucket).sort((left, right) =>
+    left.scope.localeCompare(right.scope) || left.key.localeCompare(right.key),
+  );
+  const valueMatchResult = reportRows.find((row) => row.scope === "primary" && row.key === "MATCH_RESULT|VALUE") ?? null;
+  const controlMatchResult = reportRows.find((row) => row.scope === "primary" && row.key === "MATCH_RESULT|CONTROL") ?? null;
+  const mono = monotonicity(reportRows);
+  const ready = valueMatchResult &&
+    valueMatchResult.count >= 200 &&
+    (valueMatchResult.avgClv ?? -1) > 0 &&
+    (valueMatchResult.probabilityClvPositive ?? 0) > 0.5 &&
+    mono.status === "PASS";
+
+  return {
+    generatedAt,
+    decision: {
+      modelStatus: ready ? "CALIBRATED_EDGE_CANDIDATE" : "RANKING_SIGNAL",
+      reason: ready ? "Primary h2h sample passes calibration gates" : "Primary h2h sample is below production calibration gates",
+    },
+    monotonicity: mono,
+    confidence: {
+      valueMatchResult: valueMatchResult ?? {},
+      controlMatchResult: controlMatchResult ?? {},
+    },
+    rows: reportRows,
+  };
+}
+
+export function calibrationCsvRow(row) {
+  return Object.fromEntries(CALIBRATION_REPORT_COLUMNS.map((key) => [key, decimal(row[key])]));
+}

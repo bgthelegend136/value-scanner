@@ -45,6 +45,11 @@ import { analyzeBoostMix, parseMixLeg, priceMixLeg } from "./boost_mix.mjs";
 import { createFootballDataClient } from "./football_data_client.mjs";
 import { fdCompetitionFor, synthesizeFdScoreEvents } from "./football_data_settle.mjs";
 import { buildProfitEngineReport, profitEngineRows } from "./profit_engine.mjs";
+import { buildDataHealthReport, DATA_HEALTH_COLUMNS } from "./data_health.mjs";
+import { buildProfitabilityReport, profitabilityCsvRow, PROFITABILITY_COLUMNS } from "./profitability_report.mjs";
+import { buildCalibrationReport, calibrationCsvRow, CALIBRATION_REPORT_COLUMNS } from "./calibration_report.mjs";
+import { buildStakingSimReport, stakingSimCsvRow, STAKING_SIM_COLUMNS } from "./staking_sim.mjs";
+import { buildDailyDecisionReport } from "./daily_decision_report.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,6 +95,7 @@ const LIVE_TRAINING_COLUMNS = [
   "consensusFairProbability", "consensusFairOdds", "consensusEv", "consensusBooks",
   "minimumConfirmedEv", "edgeOverDispersion",
   "sampleTier", "confirmationStatus", "rejectionReason",
+  "source",
 ];
 const MARKET_AVAILABILITY_COLUMNS = [
   "sportKey", "eventId", "market", "bookCount", "books", "reason", "creditsSpent",
@@ -410,6 +416,7 @@ function liveUpdatedTrainingRow(row, observedAt) {
     sampleTier: "LIVE_UNCONFIRMED",
     confirmationStatus: "UNCONFIRMED",
     rejectionReason: "",
+    source: "updated_poll",
   };
 }
 
@@ -1753,6 +1760,114 @@ async function runProfitEngine({ args, out, reportsDir, now }) {
   );
   return 0;
 }
+
+async function runDataHealth({ out, reportsDir, now }) {
+  const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
+  const report = buildDataHealthReport({
+    rows: paperRows,
+    generatedAt: now().toISOString(),
+    now: now(),
+  });
+  await writeCsv(join(reportsDir, "data-health.csv"), report.issues, DATA_HEALTH_COLUMNS);
+  await writeFile(
+    join(reportsDir, "data-health.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+    "utf8",
+  );
+  out(`Data health: ERROR=${report.summary.ERROR}, WARN=${report.summary.WARN}, INFO=${report.summary.INFO}\n`);
+  return 0;
+}
+
+async function runProfitabilityReport({ out, reportsDir, now }) {
+  const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
+  const report = buildProfitabilityReport({
+    rows: paperRows,
+    generatedAt: now().toISOString(),
+  });
+  const csvRows = report.rows.map(profitabilityCsvRow);
+  await writeCsv(join(reportsDir, "profitability-report.csv"), csvRows, PROFITABILITY_COLUMNS);
+  await writeFile(
+    join(reportsDir, "profitability-report.json"),
+    `${JSON.stringify({
+      ...report,
+      rows: csvRows,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  out(`Profitability report: ${report.mode} (${report.gates.valueMatchResultSettled} VALUE h2h settled, ${report.gates.valueMatchResultClvCaptured} VALUE h2h CLV)\n`);
+  return 0;
+}
+
+async function runCalibrationReport({ out, reportsDir, now }) {
+  const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
+  const report = buildCalibrationReport({
+    rows: paperRows,
+    generatedAt: now().toISOString(),
+  });
+  const csvRows = report.rows.map(calibrationCsvRow);
+  await writeCsv(join(reportsDir, "calibration-report.csv"), csvRows, CALIBRATION_REPORT_COLUMNS);
+  await writeFile(
+    join(reportsDir, "calibration-report.json"),
+    `${JSON.stringify({
+      ...report,
+      rows: csvRows,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  out(`Calibration report: ${report.decision.modelStatus} (${report.monotonicity.status})\n`);
+  return 0;
+}
+
+async function runStakingSim({ args, out, reportsDir, now }) {
+  const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
+  const bankroll = numericArg(args, "bankroll", 1000);
+  const maxStake = numericArg(args, "max-stake", 10);
+  const policy = optionValue(args, "policy", "flat");
+  const report = buildStakingSimReport({
+    rows: paperRows,
+    generatedAt: now().toISOString(),
+    bankroll,
+    policy,
+    maxStake,
+  });
+  const csvRows = report.rows.map(stakingSimCsvRow);
+  await writeCsv(join(reportsDir, "staking-sim.csv"), csvRows, STAKING_SIM_COLUMNS);
+  await writeFile(
+    join(reportsDir, "staking-sim.json"),
+    `${JSON.stringify({
+      ...report,
+      rows: csvRows,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  out(`Staking sim: ${report.mode} (${report.policy}, final bankroll ${report.summary.finalBankroll.toFixed(2)})\n`);
+  return 0;
+}
+
+async function runDailyDecisionReport({ out, reportsDir, now }) {
+  const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
+  const liveFeedStatsRows = await readCsvIfPresent(join(reportsDir, "ws-live-feed-stats.csv"));
+  const liveTrainingRows = await readCsvIfPresent(join(reportsDir, "live-training-observations.csv"));
+  const report = buildDailyDecisionReport({
+    generatedAt: now().toISOString(),
+    paperRows,
+    liveFeedStatsRows,
+    liveTrainingRows,
+    now: now(),
+  });
+  await writeFile(
+    join(reportsDir, "daily-decision-report.md"),
+    report.markdown,
+    "utf8",
+  );
+  await writeFile(
+    join(reportsDir, "daily-decision-report.json"),
+    `${JSON.stringify({ ...report, markdown: undefined }, null, 2)}\n`,
+    "utf8",
+  );
+  out(`Daily decision report: ${report.mode} (${report.blockers.length} blockers)\n`);
+  return 0;
+}
 // Capture closing-line value for sent mispricing alerts. Reuses the same Pinnacle
 // de-vig + applyClosingLine/summarizeClv machinery as paper-bet CLV, but reads the
 // mispricing alert ledger and queries each sport once, limited to tracked events.
@@ -2359,6 +2474,21 @@ export async function runCli(argv, deps = {}) {
     if (command === "value-flow-report") {
       return await runValueFlowReport({ out, reportsDir, now });
     }
+    if (command === "data-health") {
+      return await runDataHealth({ out, reportsDir, now });
+    }
+    if (command === "profitability-report") {
+      return await runProfitabilityReport({ out, reportsDir, now });
+    }
+    if (command === "calibration-report") {
+      return await runCalibrationReport({ out, reportsDir, now });
+    }
+    if (command === "staking-sim") {
+      return await runStakingSim({ args: rest, out, reportsDir, now });
+    }
+    if (command === "daily-decision-report") {
+      return await runDailyDecisionReport({ out, reportsDir, now });
+    }
     if (command === "profit-engine") {
       return await runProfitEngine({
         args: rest,
@@ -2452,7 +2582,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | data-health | profitability-report | calibration-report | staking-sim [--bankroll=N --policy=flat|flat_pct|kelly10|kelly25 --max-stake=N] | daily-decision-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

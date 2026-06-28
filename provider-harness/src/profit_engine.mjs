@@ -81,6 +81,8 @@ export function summarizeLiveEfficiency({
     .filter((value) => value !== null);
   const marketMessageRows = liveFeedStatsRows.filter((row) =>
     MARKET_MESSAGE_TYPES.has(String(row.messageType ?? ""))).length;
+  const updatedPollRows = liveFeedStatsRows.filter((row) =>
+    String(row.messageType ?? "") === "updated_poll").length;
   const candidateMessageRows = liveFeedStatsRows.filter((row) =>
     CANDIDATE_MESSAGE_TYPES.has(String(row.messageType ?? ""))).length;
   const trainingRowsFromFeed = sumNumeric(liveFeedStatsRows, "trainingRows");
@@ -101,6 +103,7 @@ export function summarizeLiveEfficiency({
     scoreRows: liveFeedStatsRows.filter((row) => row.messageType === "score").length,
     statusMessageRows: liveFeedStatsRows.filter((row) => row.messageType === "status").length,
     welcomeRows: liveFeedStatsRows.filter((row) => row.messageType === "welcome").length,
+    updatedPollRows,
     liquidityRows: maxBetValues.length,
     averageMaxBet: average(maxBetValues),
     maxObservedBetLimit: maxBetValues.length ? Math.max(...maxBetValues) : null,

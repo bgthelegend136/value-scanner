@@ -453,6 +453,38 @@ Reason:
 - One unsupported active sport should not stop a multi-sport collection block.
 - A regression test now covers this behavior.
 
+### 2026-06-28: Add reliability and profitability reporting layer
+
+Decision:
+
+- Add offline commands for `data-health`, `profitability-report`,
+  `calibration-report`, `staking-sim`, and `daily-decision-report`.
+- Keep all new commands zero-credit and report-only.
+- Keep real staking disabled.
+
+Reason:
+
+- The project needs daily decision support, not only raw collection scripts.
+- ROI must be measured by VALUE h2h sample, not by total paper rows.
+- Quant confidence needs segment-level CLV, ROI, calibration, and drawdown views.
+
+Latest real-data run:
+
+- `data-health`: ERROR 24, WARN 797, INFO 84.
+- `profitability-report`: RESEARCH_ONLY, 63 VALUE h2h settled, 114 VALUE h2h
+  CLV.
+- `calibration-report`: RANKING_SIGNAL, monotonicity PASS.
+- `staking-sim --bankroll=1000 --policy=flat --max-stake=10`: RESEARCH_ONLY,
+  final bankroll 1137.00 in paper simulation.
+- `daily-decision-report`: RESEARCH_ONLY with 6 blockers.
+
+Interpretation:
+
+- The h2h signal remains promising, but still below the 200/200 VALUE h2h gate.
+- Data-health errors must be reviewed before trusting production-style gates.
+- Staking simulation is now available for research, but does not approve real
+  staking.
+
 ## Next Gates
 
 Do not move beyond RESEARCH_ONLY until these gates are met:
