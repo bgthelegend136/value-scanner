@@ -3,6 +3,7 @@ import {
   summarizePaperBets,
   summarizeResearchStatus,
 } from "./paper.mjs";
+import { quarantineReportRows } from "./report_domain.mjs";
 import { kellyStake } from "./staking.mjs";
 
 const VALUE_TIERS = new Set(["VALUE", "VALUE_CHECK", "SUSPICIOUS"]);
@@ -148,15 +149,16 @@ export function buildProfitEngineReport({
   kellyFraction = 0.25,
   stakeCapFraction = 0.02,
 } = {}) {
-  const paperSummary = summarizePaperBets(paperRows);
-  const researchRows = summarizeResearchStatus(paperRows);
+  const analysisPaperRows = quarantineReportRows(paperRows);
+  const paperSummary = summarizePaperBets(analysisPaperRows);
+  const researchRows = summarizeResearchStatus(analysisPaperRows);
   const overallResearch = researchRows.find((row) => row.scope === "overall" && row.key === "all");
   const mainResearch = researchRows.find((row) => row.scope === "main" && row.key === "MATCH_RESULT");
-  const calibration = summarizeClvCalibration(paperRows);
+  const calibration = summarizeClvCalibration(analysisPaperRows);
   const valueRow = calibrationRow(calibration, "tier", "VALUE");
   const controlRow = calibrationRow(calibration, "tier", "CONTROL");
   const mainRow = calibration.mainScore;
-  const mainValueAverageClv = averageClv(valueClvRows(paperRows)
+  const mainValueAverageClv = averageClv(valueClvRows(analysisPaperRows)
     .filter((row) => row.market === "MATCH_RESULT"));
   const live = summarizeLiveEfficiency({
     liveFeedStatsRows,
@@ -165,14 +167,14 @@ export function buildProfitEngineReport({
     liveAuditRows,
     lifetimeRows,
   });
-  const valueSettled = valueSettledRows(paperRows).length;
+  const valueSettled = valueSettledRows(analysisPaperRows).length;
 
   const configuredBankroll = optionalNumber(bankroll);
   const configuredMaxStake = optionalNumber(maxStake);
   const maxStakeFraction = configuredBankroll && configuredMaxStake
     ? Math.min(stakeCapFraction, configuredMaxStake / configuredBankroll)
     : stakeCapFraction;
-  const sampleFractions = stakeFractions(valueClvRows(paperRows), {
+  const sampleFractions = stakeFractions(valueClvRows(analysisPaperRows), {
     kellyFraction,
     stakeCapFraction: maxStakeFraction,
   });

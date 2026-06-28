@@ -1,3 +1,8 @@
+import {
+  hasUsableClv,
+  hasValidDecimalOdds,
+} from "./report_domain.mjs";
+
 export const PAPER_COLUMNS = [
   "referenceEventId", "bettableEventId", "firstSeenAt", "kickoffUtc",
   "homeTeam", "awayTeam", "bookmaker", "market", "line", "outcome",
@@ -241,7 +246,7 @@ export function summarizeClv(rows) {
   let positive = 0;
   let total = 0;
   for (const row of rows) {
-    if (!row.clv) continue;
+    if (!hasValidDecimalOdds(row) || !hasUsableClv(row)) continue;
     const clv = Number(row.clv);
     if (!Number.isFinite(clv)) continue;
     captured += 1;
@@ -282,7 +287,7 @@ function finishClvBucket(bucket) {
 export function summarizeClvTrend(rows) {
   const buckets = new Map();
   for (const row of rows) {
-    if (!row.clv) continue;
+    if (!hasValidDecimalOdds(row) || !hasUsableClv(row)) continue;
     const clv = Number(row.clv);
     if (!Number.isFinite(clv)) continue;
     addClvBucket(buckets, "overall", "all", clv);
@@ -314,7 +319,7 @@ function isValueTier(row) {
 }
 
 function hasCapturedClv(row) {
-  return optionalFinite(row.clv) !== null;
+  return hasUsableClv(row);
 }
 
 function emptyResearchBucket(scope, key) {
@@ -377,7 +382,7 @@ export function summarizeResearchStatus(rows) {
   for (const market of RESEARCH_STATUS_MARKETS) {
     ensureResearchBucket(buckets, "market", market);
   }
-  for (const row of rows) {
+  for (const row of rows.filter(hasValidDecimalOdds)) {
     addResearchBucket(buckets, "overall", "all", row);
     if (row.market === "MATCH_RESULT") addResearchBucket(buckets, "main", "MATCH_RESULT", row);
     addResearchBucket(buckets, "market", row.market, row);
@@ -395,6 +400,7 @@ export function summarizeResearchStatus(rows) {
 function clvCalibrationSample(rows) {
   const samples = [];
   for (const row of rows) {
+    if (!hasValidDecimalOdds(row) || !hasUsableClv(row)) continue;
     const ev = optionalFinite(row.ev);
     const clv = optionalFinite(row.clv);
     if (ev === null || clv === null) continue;

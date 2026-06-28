@@ -247,11 +247,13 @@ test("summarizes CLV trend overall, per sport, and per capture day", () => {
     }),
     pending({
       sportKey: "soccer_brazil_serie_b",
+      kickoffUtc: "2026-06-25T22:00:00.000Z",
       clv: "-0.050000",
       clvCapturedAt: "2026-06-25T21:55:00.000Z",
     }),
     pending({
       sportKey: "soccer_fifa_world_cup",
+      kickoffUtc: "2026-06-26T18:00:00.000Z",
       clv: "0.100000",
       clvCapturedAt: "2026-06-26T17:55:00.000Z",
     }),

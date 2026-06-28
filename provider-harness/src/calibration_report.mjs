@@ -2,12 +2,12 @@ import {
   average,
   decimal,
   evBucket,
-  hasClv,
   isPrimaryMarket,
   isSettled,
   median,
   optionalNumber,
   oddsBucket,
+  quarantineReportRows,
   tierGroup,
   timeToCloseBucket,
 } from "./report_domain.mjs";
@@ -113,7 +113,7 @@ function monotonicity(rows) {
 
 function matchedControlComparisons(rows) {
   const buckets = new Map();
-  for (const row of rows.filter(hasClv)) {
+  for (const row of rows) {
     const tier = tierGroup(row);
     if (!["VALUE", "CONTROL"].includes(tier)) continue;
     const key = `${row.market || "(blank)"}|${oddsBucket(optionalNumber(row.decimalOdds))}|${timeToCloseBucket(row)}`;
@@ -143,7 +143,8 @@ function matchedControlComparisons(rows) {
 
 export function buildCalibrationReport({ rows = [], generatedAt = new Date().toISOString() } = {}) {
   const buckets = new Map();
-  for (const row of rows.filter(hasClv)) {
+  const analysisRows = quarantineReportRows(rows).filter((row) => optionalNumber(row.clv) !== null);
+  for (const row of analysisRows) {
     addBucket(buckets, "overall", "all", row);
     addBucket(buckets, "tier", tierGroup(row), row);
     addBucket(buckets, "market", row.market || "(blank)", row);
@@ -158,7 +159,7 @@ export function buildCalibrationReport({ rows = [], generatedAt = new Date().toI
   const valueMatchResult = reportRows.find((row) => row.scope === "primary" && row.key === "MATCH_RESULT|VALUE") ?? null;
   const controlMatchResult = reportRows.find((row) => row.scope === "primary" && row.key === "MATCH_RESULT|CONTROL") ?? null;
   const mono = monotonicity(reportRows);
-  const comparisons = matchedControlComparisons(rows);
+  const comparisons = matchedControlComparisons(analysisRows);
   const ready = valueMatchResult &&
     valueMatchResult.count >= 200 &&
     (valueMatchResult.avgClv ?? -1) > 0 &&

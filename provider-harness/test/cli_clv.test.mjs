@@ -315,8 +315,8 @@ test("clv-report writes trend summaries without spending API quota", async () =>
   const reportsDir = await mkdtemp(join(tmpdir(), "clv-report-"));
   await writeCsv(join(reportsDir, "paper-bets.csv"), [
     paperRow({ sportKey: "soccer_fifa_world_cup", clv: "0.200000", clvCapturedAt: "2026-06-25T17:55:00.000Z" }),
-    paperRow({ sportKey: "soccer_brazil_serie_b", clv: "-0.050000", clvCapturedAt: "2026-06-25T21:55:00.000Z" }),
-    paperRow({ sportKey: "soccer_fifa_world_cup", clv: "0.100000", clvCapturedAt: "2026-06-26T17:55:00.000Z" }),
+    paperRow({ sportKey: "soccer_brazil_serie_b", kickoffUtc: "2026-06-25T22:00:00.000Z", clv: "-0.050000", clvCapturedAt: "2026-06-25T21:55:00.000Z" }),
+    paperRow({ sportKey: "soccer_fifa_world_cup", kickoffUtc: "2026-06-26T18:00:00.000Z", clv: "0.100000", clvCapturedAt: "2026-06-26T17:55:00.000Z" }),
     paperRow({ sportKey: "soccer_fifa_world_cup", clv: "", clvCapturedAt: "" }),
   ], PAPER_COLUMNS);
   let out = "";
@@ -359,6 +359,7 @@ test("clv-calibrate writes EV bucket and segment diagnostics without spending AP
       tier: "CONTROL",
       bookmaker: "betfair_ex_eu",
       sportKey: "basketball_wnba",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       decimalOdds: "2.0000",
       ev: "-0.030000",
       clv: "-0.040000",
@@ -369,6 +370,7 @@ test("clv-calibrate writes EV bucket and segment diagnostics without spending AP
       tier: "CONTROL",
       bookmaker: "matchbook",
       sportKey: "baseball_mlb",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       decimalOdds: "1.8000",
       ev: "0.010000",
       clv: "-0.005000",
@@ -379,6 +381,7 @@ test("clv-calibrate writes EV bucket and segment diagnostics without spending AP
       tier: "VALUE",
       bookmaker: "Stoiximan",
       sportKey: "soccer_fifa_world_cup",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       decimalOdds: "2.5000",
       ev: "0.040000",
       clv: "0.030000",
@@ -389,6 +392,7 @@ test("clv-calibrate writes EV bucket and segment diagnostics without spending AP
       tier: "VALUE",
       bookmaker: "Novibet",
       sportKey: "soccer_fifa_world_cup",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       decimalOdds: "6.0000",
       ev: "0.120000",
       clv: "0.080000",
@@ -441,6 +445,7 @@ test("clv-calibrate adds main score, unique selection counts, and low-sample mar
       referenceEventId: "main-1",
       bookmaker: "softbook",
       market: "MATCH_RESULT",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       outcome: "1",
       ev: "0.030000",
       clv: "0.040000",
@@ -450,6 +455,7 @@ test("clv-calibrate adds main score, unique selection counts, and low-sample mar
       referenceEventId: "main-1",
       bookmaker: "softbook",
       market: "MATCH_RESULT",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       outcome: "1",
       ev: "0.030000",
       clv: "0.040000",
@@ -458,6 +464,7 @@ test("clv-calibrate adds main score, unique selection counts, and low-sample mar
     paperRow({
       referenceEventId: "totals-1",
       market: "TOTALS",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       line: "2.5",
       outcome: "OVER",
       ev: "0.020000",
@@ -467,6 +474,7 @@ test("clv-calibrate adds main score, unique selection counts, and low-sample mar
     paperRow({
       referenceEventId: "btts-1",
       market: "BTTS",
+      kickoffUtc: "2026-06-27T18:00:00.000Z",
       outcome: "YES",
       ev: "0.010000",
       clv: "0.020000",

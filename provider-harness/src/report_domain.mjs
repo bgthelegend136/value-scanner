@@ -31,6 +31,38 @@ export function hasClv(row) {
   return optionalNumber(row.clv) !== null;
 }
 
+export function hasValidDecimalOdds(row) {
+  const odds = optionalNumber(row.decimalOdds);
+  return odds !== null && odds > 1;
+}
+
+export function hasPostKickoffClv(row) {
+  if (!hasClv(row)) return false;
+  const kickoff = Date.parse(row.kickoffUtc);
+  const captured = Date.parse(row.clvCapturedAt);
+  return Number.isFinite(kickoff) && Number.isFinite(captured) && captured > kickoff;
+}
+
+export function hasUsableClv(row) {
+  return hasClv(row) && !hasPostKickoffClv(row);
+}
+
+export function rowWithUsableClv(row) {
+  if (!hasPostKickoffClv(row)) return row;
+  return {
+    ...row,
+    closingFairOdds: "",
+    clv: "",
+    clvCapturedAt: "",
+  };
+}
+
+export function quarantineReportRows(rows) {
+  return rows
+    .filter(hasValidDecimalOdds)
+    .map(rowWithUsableClv);
+}
+
 export function selectionKey(row) {
   return [
     row.referenceEventId,

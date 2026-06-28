@@ -551,6 +551,55 @@ Interpretation:
 - The next live measurement action is `live-updated-poll`; real staking and live
   alerts remain blocked.
 
+### 2026-06-28: Quarantine corrupt odds and post-kickoff CLV from quant gates
+
+Decision:
+
+- Exclude rows with `decimalOdds <= 1` from profitability, calibration, staking,
+  research-status, CLV trend/calibration, and profit-engine analysis.
+- Keep settled rows with post-kickoff CLV eligible for ROI, but remove their CLV
+  signal from CLV counts, averages, calibration, and readiness gates.
+- Keep `data-health` reporting the original bad rows as ERRORs instead of
+  silently rewriting the ledger.
+- Keep `/odds/updated` as active live source and WebSocket as diagnostic-only
+  while WebSocket market messages remain zero.
+- Disable the scheduled `Bet-Mispricing-Scanner` production Telegram alert task
+  until readiness gates pass.
+
+Reason:
+
+- Odds at or below 1.00 are not economically valid decimal prices and can
+  distort ROI, Kelly, and CLV calculations.
+- CLV captured after kickoff is not closing-line evidence; using it would leak
+  post-start information into model confidence.
+- Quarantine-at-analysis preserves auditability while preventing corrupted rows
+  from moving gates.
+
+Latest real-data run after quarantine:
+
+- `research-status`: 118 VALUE CLV captured, 115 main MATCH_RESULT VALUE CLV,
+  83 VALUE pending without CLV, 491 CONTROL CLV captured.
+- `profitability-report`: RESEARCH_ONLY, 57 VALUE h2h settled, 111 VALUE h2h
+  CLV.
+- `calibration-report`: RANKING_SIGNAL, monotonicity FAIL because the 5..10% EV
+  bucket underperformed a lower EV bucket.
+- `profit-engine`: RESEARCH_ONLY, VALUE avg CLV +1.61%, CONTROL avg CLV -2.04%,
+  paper ROI -0.95% across 283 settled analysis rows, live market messages 0,
+  live training rows 94.
+- `staking-sim --bankroll=1000 --policy=flat --max-stake=10
+  --daily-exposure-pct=5`: final bankroll 1043.70.
+- `staking-sim --bankroll=1000 --policy=kelly25 --max-stake=100
+  --daily-exposure-pct=5`: final bankroll 1030.43.
+
+Interpretation:
+
+- The h2h VALUE-vs-CONTROL CLV spread is still encouraging, but not actionable.
+- The model should be treated as a ranking signal, not calibrated EV, until the
+  monotonicity issue clears on a larger clean sample.
+- Telegram betting alerts should remain disabled for real staking. If Telegram
+  is used now, it should be research-only and limited to high-confidence paper
+  notifications.
+
 ## Next Gates
 
 Do not move beyond RESEARCH_ONLY until these gates are met:

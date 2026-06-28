@@ -3,11 +3,11 @@ import {
   decimal,
   evBucket,
   eventSelectionKey,
-  hasClv,
   isPrimaryMarket,
   isSettled,
   optionalNumber,
   oddsBucket,
+  quarantineReportRows,
   selectionKey,
   tierGroup,
   timeToCloseBucket,
@@ -108,8 +108,9 @@ function summarize(rows, grain, dedupeKeyFn = null) {
 }
 
 export function buildProfitabilityReport({ rows = [], generatedAt = new Date().toISOString() } = {}) {
-  const rowLevel = summarize(rows, "row");
-  const eventLevel = summarize(rows, "event", eventSelectionKey);
+  const analysisRows = quarantineReportRows(rows);
+  const rowLevel = summarize(analysisRows, "row");
+  const eventLevel = summarize(analysisRows, "event", eventSelectionKey);
   const reportRows = [...rowLevel, ...eventLevel].sort((left, right) =>
     left.scope.localeCompare(right.scope) || left.key.localeCompare(right.key) || left.grain.localeCompare(right.grain),
   );

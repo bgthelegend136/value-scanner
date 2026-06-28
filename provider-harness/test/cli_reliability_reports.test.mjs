@@ -134,6 +134,35 @@ test("profitability-report gates production on VALUE h2h sample and excludes tot
   assert.equal(json.gates.valueMatchResultClvReady, false);
 });
 
+test("profitability-report quarantines invalid odds and ignores post-kickoff CLV in gates", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "profitability-report-quarantine-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "valid-value", clv: "0.040000", profit: "1.0000" }),
+    paperRow({ referenceEventId: "bad-odds", decimalOdds: "1.0000", clv: "0.900000", profit: "0.0000" }),
+    paperRow({
+      referenceEventId: "late-clv",
+      clv: "0.500000",
+      clvCapturedAt: "2026-06-28T18:01:00.000Z",
+      profit: "1.0000",
+    }),
+  ], PAPER_COLUMNS);
+
+  const { code } = await runOffline("profitability-report", reportsDir);
+
+  assert.equal(code, 0);
+  const csv = await readCsv(join(reportsDir, "profitability-report.csv"));
+  const primaryValue = csv.find((row) =>
+    row.scope === "primary" && row.key === "MATCH_RESULT|VALUE" && row.grain === "row");
+  assert.equal(primaryValue.rows, "2");
+  assert.equal(primaryValue.settled, "2");
+  assert.equal(primaryValue.clvCaptured, "1");
+  assert.equal(primaryValue.avgClv, "0.040000");
+
+  const json = JSON.parse(await readFile(join(reportsDir, "profitability-report.json"), "utf8"));
+  assert.equal(json.gates.valueMatchResultSettled, 2);
+  assert.equal(json.gates.valueMatchResultClvCaptured, 1);
+});
+
 test("calibration-report writes EV bucket diagnostics, matched control comparison, and confidence", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "calibration-report-"));
   await writeCsv(join(reportsDir, "paper-bets.csv"), [
@@ -156,6 +185,29 @@ test("calibration-report writes EV bucket diagnostics, matched control compariso
   assert.equal(json.decision.modelStatus, "RANKING_SIGNAL");
   assert.ok(json.confidence.valueMatchResult.probabilityClvPositive > 0.5);
   assert.equal(json.monotonicity.status, "PASS");
+});
+
+test("calibration-report excludes invalid odds and post-kickoff CLV rows", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "calibration-report-quarantine-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "valid-value", ev: "0.040000", clv: "0.040000", profit: "1.0000" }),
+    paperRow({ referenceEventId: "bad-odds", decimalOdds: "1.0000", ev: "0.900000", clv: "0.900000", profit: "0.0000" }),
+    paperRow({
+      referenceEventId: "late-clv",
+      ev: "0.080000",
+      clv: "0.500000",
+      clvCapturedAt: "2026-06-28T18:01:00.000Z",
+      profit: "1.0000",
+    }),
+  ], PAPER_COLUMNS);
+
+  const { code } = await runOffline("calibration-report", reportsDir);
+
+  assert.equal(code, 0);
+  const json = JSON.parse(await readFile(join(reportsDir, "calibration-report.json"), "utf8"));
+  assert.equal(json.confidence.valueMatchResult.count, 1);
+  assert.equal(json.confidence.valueMatchResult.avgClv, 0.04);
+  assert.equal(json.confidence.valueMatchResult.avgEv, 0.04);
 });
 
 test("calibration-report compares matched VALUE and CONTROL buckets and downgrades non-monotonic EV", async () => {
@@ -207,6 +259,25 @@ test("staking-sim simulates flat and capped Kelly policies without enabling real
   assert.equal(json.realStakingEnabled, false);
   assert.equal(json.policy, "flat");
   assert.equal(json.summary.maxDrawdown, 10);
+});
+
+test("staking-sim quarantines invalid odds from simulated bets", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "staking-sim-quarantine-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "valid-win", decimalOdds: "2.0000", profit: "1.0000" }),
+    paperRow({ referenceEventId: "bad-odds", decimalOdds: "1.0000", profit: "0.0000" }),
+  ], PAPER_COLUMNS);
+
+  const { code } = await runOffline("staking-sim", reportsDir, [
+    "--bankroll=1000",
+    "--policy=flat",
+    "--max-stake=10",
+  ]);
+
+  assert.equal(code, 0);
+  const json = JSON.parse(await readFile(join(reportsDir, "staking-sim.json"), "utf8"));
+  assert.equal(json.summary.bets, 1);
+  assert.equal(json.summary.finalBankroll, 1010);
 });
 
 test("staking-sim enforces daily exposure cap and writes exposure/risk diagnostics", async () => {

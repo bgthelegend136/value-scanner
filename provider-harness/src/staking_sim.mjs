@@ -1,6 +1,7 @@
 import { kellyStake } from "./staking.mjs";
 import {
   decimal,
+  hasValidDecimalOdds,
   isPrimaryMarket,
   isSettled,
   optionalNumber,
@@ -173,7 +174,7 @@ export function buildStakingSimReport({
   dailyExposurePct = 0.05,
 } = {}) {
   const candidates = rows
-    .filter((row) => tierGroup(row) === "VALUE" && isPrimaryMarket(row) && isSettled(row))
+    .filter((row) => hasValidDecimalOdds(row) && tierGroup(row) === "VALUE" && isPrimaryMarket(row) && isSettled(row))
     .sort((left, right) => String(left.firstSeenAt ?? "").localeCompare(String(right.firstSeenAt ?? "")));
   const simulated = simulateRows(candidates, { bankroll, policy, maxStake, dailyExposurePct });
   const { summary } = simulated;
