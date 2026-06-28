@@ -337,3 +337,42 @@ test("theodds-sweep skips sports that reject h2h too", async () => {
   assert.equal(code, 0);
   assert.match(out, /skippedSports=1/);
 });
+
+test("theodds-sweep skips explicit h2h rejects and continues other sports", async () => {
+  const calls = [];
+  let out = "";
+  const reportsDir = await mkdtemp(join(tmpdir(), "theodds-sweep-explicit-h2h-skip-"));
+
+  const code = await runCli([
+    "theodds-sweep",
+    "--markets=h2h",
+    "--sports=bad_sport,soccer_fifa_world_cup",
+  ], {
+    out: (text) => { out += text; },
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async listSports() {
+        return {
+          data: [
+            { key: "bad_sport", active: true },
+            { key: "soccer_fifa_world_cup", active: true },
+          ],
+        };
+      },
+      async getOdds(args) {
+        calls.push(args);
+        if (args.sportKey === "bad_sport") {
+          throw new Error("The Odds API request failed with status 422");
+        }
+        return { data: [event], receivedAt: "2026-06-27T12:00:05Z", quota: { remaining: 19888, lastCost: 1 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-27T12:00:05Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls.map((call) => call.sportKey), ["bad_sport", "soccer_fifa_world_cup"]);
+  assert.match(out, /skippedSports=1/);
+});

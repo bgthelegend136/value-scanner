@@ -1130,7 +1130,11 @@ async function runTheOddsSweep({
     try {
       response = await client.getOdds({ sportKey, regions, markets });
     } catch (error) {
-      if (!String(error.message).includes("status 422") || markets === "h2h") throw error;
+      if (!String(error.message).includes("status 422")) throw error;
+      if (markets === "h2h") {
+        skippedSports += 1;
+        continue;
+      }
       try {
         response = await client.getOdds({ sportKey, regions, markets: "h2h" });
       } catch (fallbackError) {

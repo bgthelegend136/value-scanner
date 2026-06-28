@@ -34,6 +34,40 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-28 (The Odds API-first collection block executed).**
+> Ran the The Odds API-first plan instead of spending more time on live
+> Odds-API.io debugging. Fixed `theodds-sweep --markets=h2h` so a sport-level
+> 422 is skipped and the sweep continues to other active sports; focused test
+> `test/cli_theodds_sweep.test.mjs` covers this regression. Operational runs:
+> `market-availability` on soccer-core markets used **26** credits; main
+> `h2h` sweep over 20 active sports skipped 4 unsupported sports, wrote
+> **70** value candidates, recorded **49** new VALUE paper rows, and sampled
+> **230** controls for **16** credits; capped `soccer-core` sweep used **250**
+> credits, recorded **41** new VALUE rows and **88** controls. CLV capture now
+> has **531** captured rows. Research status moved from **86** to **106** VALUE
+> CLV captured overall and **83** to **103** main `MATCH_RESULT` VALUE CLV;
+> VALUE avg CLV is **+1.91%**, CONTROL **-2.02%**, main VALUE `MATCH_RESULT`
+> **+2.26%**. Still **RESEARCH_ONLY**: only **7** settled rows, VALUE CLV is
+> still below 200, and live has **0** market/training rows.
+>
+> **Status update 2026-06-28 (historical h2h credit block executed).**
+> P5 is now executed within the planned 4k-8k historical credit window. Ran
+> h2h-only multi-snapshot historical calibration with snapshots
+> `24h,6h,1h,10m` and reserve guard. First block:
+> `--leagues=BL1,SA,PD --max-events-per-league=50 --max-credits=6000
+> --reserve-credits=2000` covered BL1+PD, SA had 0 finished outcomes, pulled
+> **100** matches, calibrated **90** events, spent **3600** credits, quota
+> remaining **10979**. Second block:
+> `--leagues=BL1,PD --from=2026-01-01 --to=2026-06-28
+> --max-events-per-league=30 --max-credits=2500 --reserve-credits=2000`
+> pulled **60** more matches, calibrated **54** events, spent **2160** credits,
+> quota remaining **8759** before the final CLV/report pass and **8753** after.
+> Total historical spend in this block: **5760** credits. Latest historical
+> validation still supports the reference model versus baseline: first block
+> consensus_power_median validate Brier **0.5802** vs baseline **0.6548**,
+> logLoss **0.9705** vs baseline **1.0815**. Historical remains a fair-probability
+> calibration only, not a Stoiximan/Novibet backtest.
+>
 > **Status update 2026-06-28 (API-grounded live + calibration reliability).**
 > Implemented the official-docs-driven reliability layer. New Odds-API.io
 > diagnostics: `node src/cli.mjs live-preflight --sport=football
