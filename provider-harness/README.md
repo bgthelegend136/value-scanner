@@ -42,7 +42,7 @@ included in error messages or request URLs.
 ## Multi-sport bookmaker-mistake alerts
 
 `mispricing-scan` is a separate mode for detecting unusually large pre-match
-pricing mistakes at Stoiximan or Superbet across all sports returned by the
+pricing mistakes at Stoiximan or Novibet across all sports returned by the
 candidate provider.
 
 ```powershell
@@ -53,11 +53,12 @@ node src/cli.mjs mispricing-scan
 
 The v1 contract is deliberately narrow:
 
-- candidates must show at least 10% provider EV;
+- candidates must show at least 5% provider EV;
 - only full-event `MATCH_RESULT`/moneyline/1X2 is supported;
-- final EV must be strictly above 10% against both de-vigged Pinnacle and the
+- final EV must be strictly above 5% against both de-vigged Pinnacle and the
   median fair probability of at least three other complete international
   bookmaker markets;
+- Telegram labels 5%-10% as a research watchlist and >=10% as urgent;
 - candidate and reference prices must be fresh and the event must be pre-match;
 - the league must have reference coverage; exact normalized active-sport titles
   are mapped automatically, while known provider aliases use the explicit
@@ -67,7 +68,7 @@ The v1 contract is deliberately narrow:
   Telegram delivery checks fail.
 
 The Telegram message contains the exact event, selection, offered odds,
-Pinnacle/consensus fair odds and EV, plus an allowlisted Stoiximan/Superbet
+Pinnacle/consensus fair odds and EV, plus an allowlisted Stoiximan/Novibet
 button when the provider supplies a safe HTTPS link. The link may open the
 event rather than a pre-filled betslip; always verify the exact market and
 price manually.
@@ -76,8 +77,8 @@ This is not restricted to football or the World Cup. Candidates from any sport
 are considered, but no alert is possible when The Odds API has no matching
 active competition or when the league identity is ambiguous.
 
-Superbet candidate links currently observed from the provider may target
-`superbet.bet.br`, not the Greece-facing product. Such alerts are useful for
+Novibet candidate links currently observed from the provider may target
+`novibet.bet.br`, not the Greece-facing product. Such alerts are useful for
 detection only and require extra manual regional verification.
 
 Runtime state is local and git-ignored:
@@ -179,7 +180,7 @@ Greek-market books (**Stoiximan**, **Superbet** via Odds-API.io) against
 **Pinnacle's de-vigged fair price** (via The Odds API). Only leagues whose
 reference sport is currently active are scanned. Default edge is **2%** (the
 realistic sharp edge; this paper-bet path sends nothing to Telegram, so it is
-deliberately looser than the 10% live-alert floor). Each paper bet records its
+deliberately looser than the 5% Telegram watchlist floor). Each paper bet records its
 `sportKey` so `clv`/`settle` query the right sport. Requires both keys in
 `.env.local`: `ODDS_API_IO_KEY` and `THE_ODDS_API_KEY`.
 

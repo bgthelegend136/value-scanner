@@ -1,14 +1,14 @@
 // Single source of truth for the mispricing EV gates. These are meant to be
-// tuned: the goal is to catch Stoiximan/Novibet *mistakes*, which typically
-// surface as ~10-20% edges against a de-vigged sharp consensus.
+// tuned: the goal is to collect 5%+ research signals while still separating
+// urgent 10%+ Stoiximan/Novibet mistakes from lower-confidence watchlist edges.
 //
 // MIN_CANDIDATE_EV  — Odds-API.io's (approximate) EV a candidate must show to be
 //                     worth spending a reference credit to confirm.
 // MIN_CONFIRMED_EV  — the independently-recomputed EV (vs Pinnacle and vs the
 //                     median consensus) a candidate must strictly exceed to count
 //                     as a confirmed mispricing.
-export const MIN_CANDIDATE_EV = 0.1;
-export const MIN_CONFIRMED_EV = 0.1;
+export const MIN_CANDIDATE_EV = 0.05;
+export const MIN_CONFIRMED_EV = 0.05;
 
 // Signal-to-noise floor for a confirmed edge. The consensus books give several
 // independent estimates of the fair probability; their spread (standard
@@ -23,10 +23,8 @@ export const MIN_CONFIRMED_EV = 0.1;
 // the live distribution.
 export const MIN_EDGE_OVER_DISPERSION = 1.0;
 
-// Bankroll sizing for a confirmed alert. We never stake full Kelly because the
-// fair probability is an estimate: KELLY_FRACTION shrinks the bet (quarter-Kelly
-// is the usual hedge against model error) and STAKE_CAP_FRACTION is a hard
-// ceiling as a fraction of bankroll. See src/staking.mjs.
+// Bankroll sizing defaults retained for offline profit-engine/staking research.
+// Telegram alerts intentionally do not emit stake sizing until model gates pass.
 export const KELLY_FRACTION = 0.25;
 export const STAKE_CAP_FRACTION = 0.02;
 

@@ -150,7 +150,7 @@ test("detection tier spends zero reference calls when nothing qualifies and the 
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-detect-noop-"));
   const state = createMispricingState({ reportsDir });
   const d = deps({ reportsDir, state });
-  // No raw candidate clears the 10% floor this cycle.
+  // No raw candidate clears the watchlist floor this cycle.
   d.valueBetsClient.getValueBets = async () => ({ data: [], receivedAt: now.toISOString(), rateLimit: {} });
   // The cheap detection pass must not touch The Odds API at all.
   d.referenceClient.listSports = async () => { throw new Error("listSports must not be called"); };

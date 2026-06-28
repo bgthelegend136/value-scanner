@@ -1,6 +1,7 @@
 // Scope: Stoiximan + Novibet, MATCH_RESULT-only. The EV floor (see
-// mispricing_thresholds.mjs) is tuned to catch bookmaker *mistakes* (~10-20%
-// edges). Odds-API.io reports `expectedValue` as an index ~ (offered/fair)*100,
+// mispricing_thresholds.mjs) is tuned to collect 5%+ research/watchlist edges
+// while the Telegram formatter labels >=10% separately as urgent.
+// Odds-API.io reports `expectedValue` as an index ~ (offered/fair)*100,
 // NOT a percentage, so the fraction is (value - 100)/100.
 // TOTALS stays deferred (undocumented over/under direction). Novibet candidates
 // may resolve to novibet.bet.br (Brazil) -- verify before betting.

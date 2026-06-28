@@ -68,8 +68,8 @@ test("normalizes a Novibet candidate and keeps its allowlisted .bet.br link", ()
 test("rejects below-min EV, stale, started, missing timestamp, malformed odds, and unsupported book", () => {
   const base = fixture[0];
   const mutations = [
-    // (109.9 - 100)/100 = 0.099 < 0.10 floor
-    [{ ...base, expectedValue: 109.9 }, "CANDIDATE_EV_BELOW_MIN"],
+    // (104.9 - 100)/100 = 0.049 < 0.05 watchlist floor
+    [{ ...base, expectedValue: 104.9 }, "CANDIDATE_EV_BELOW_MIN"],
     [{ ...base, expectedValueUpdatedAt: "2026-06-25T08:40:00Z" }, "STALE_CANDIDATE"],
     [{ ...base, expectedValueUpdatedAt: "" }, "INVALID_VALUE_TIMESTAMP"],
     [{ ...base, event: { ...base.event, date: "2026-06-25T08:59:00Z" } }, "EVENT_STARTED"],
@@ -91,13 +91,22 @@ test("rejects below-min EV, stale, started, missing timestamp, malformed odds, a
   }
 });
 
-test("EV prefilter is inclusive at exactly the 10 percent floor", () => {
+test("EV prefilter still accepts urgent-tier candidates at 10 percent", () => {
   const result = normalizeValueBets([{ ...fixture[0], expectedValue: 110 }], {
     receivedAt: "2026-06-25T09:00:00Z",
     now: new Date("2026-06-25T09:00:00Z"),
   });
   assert.equal(result.candidates.length, 1);
   assert.equal(result.candidates[0].providerExpectedValue, 0.1);
+});
+
+test("EV prefilter accepts research watchlist candidates at exactly the 5 percent floor", () => {
+  const result = normalizeValueBets([{ ...fixture[0], expectedValue: 105 }], {
+    receivedAt: "2026-06-25T09:00:00Z",
+    now: new Date("2026-06-25T09:00:00Z"),
+  });
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].providerExpectedValue, 0.05);
 });
 
 test("uses only allowlisted HTTPS Stoiximan links and falls back by depth", () => {

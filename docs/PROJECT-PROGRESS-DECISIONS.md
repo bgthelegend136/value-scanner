@@ -600,6 +600,42 @@ Interpretation:
   is used now, it should be research-only and limited to high-confidence paper
   notifications.
 
+### 2026-06-28: Lower Telegram advisory floor to 5% without enabling staking
+
+Decision:
+
+- Set the mispricing candidate and confirmation EV floors to 5%.
+- Keep a separate Telegram tier:
+  - `WATCHLIST_5_10` for confirmed 5%-10% EV.
+  - `URGENT_10_PLUS` for confirmed >=10% EV.
+- Keep the existing safe bookmaker link button so the exact event can be opened
+  quickly.
+- Remove suggested Kelly stake sizing from Telegram messages.
+- Re-enable the local `Bet-Mispricing-Scanner` scheduled task for research-only
+  advisory alerts; keep CLV and production gates unchanged.
+
+Reason:
+
+- The previous 10% floor generated very few alerts and can miss short-lived
+  5%-10% prices that are useful for CLV learning.
+- A 5%-10% edge is not strong enough evidence for staking while the model is
+  still `RESEARCH_ONLY`, but it is valuable for forward measurement.
+- Removing stake sizing prevents the alert from being interpreted as a betting
+  instruction before ROI/CLV/staking gates pass.
+
+Verification:
+
+- `npm test`: 282/282 passing.
+- `git diff --check`: clean except existing LF-to-CRLF warnings.
+- `mispricing-scan --dry-run`: candidates=5, confirmed=0, sent=0,
+  quotaRemaining=8367.
+
+Interpretation:
+
+- Telegram can now be used as an advisory/watchlist feed.
+- It is still not a staking system and should not be treated as calibrated EV
+  until the profitability and calibration gates pass.
+
 ## Next Gates
 
 Do not move beyond RESEARCH_ONLY until these gates are met:

@@ -1,12 +1,8 @@
 import { chooseBookmakerLink } from "./mispricing_normalize.mjs";
-import {
-  KELLY_FRACTION,
-  MIN_CONFIRMED_EV,
-  STAKE_CAP_FRACTION,
-} from "./mispricing_thresholds.mjs";
-import { kellyStake } from "./staking.mjs";
+import { MIN_CONFIRMED_EV } from "./mispricing_thresholds.mjs";
 
 const CONFIRMED_PCT = (MIN_CONFIRMED_EV * 100).toFixed(0);
+const URGENT_EV = 0.10;
 
 // v1 supports MATCH_RESULT only.
 function pickLabel(candidate) {
@@ -19,18 +15,30 @@ function percent(value) {
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 }
 
-// Suggested bankroll fraction from the conservative (minimum) confirmed edge,
-// sized by quarter-Kelly with a hard cap. Omitted when there is no positive edge
-// to stake on.
-function stakeLine(candidate, confirmation) {
-  const stake = kellyStake({
-    offeredOdds: candidate.offeredOdds,
-    edge: confirmation.minimumConfirmedEv,
-    fraction: KELLY_FRACTION,
-    cap: STAKE_CAP_FRACTION,
-  });
-  if (!(stake > 0)) return "";
-  return `Suggested stake: ${(stake * 100).toFixed(1)}% of bankroll (¼-Kelly)`;
+function finite(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function conservativeEv(confirmation) {
+  const explicit = finite(confirmation.minimumConfirmedEv);
+  if (explicit !== null) return explicit;
+  return Math.min(confirmation.pinnacleEv, confirmation.consensusEv);
+}
+
+function alertTier(confirmation) {
+  const edge = conservativeEv(confirmation);
+  if (edge >= URGENT_EV) {
+    return {
+      code: "URGENT_10_PLUS",
+      title: "URGENT MISPRICING WATCH >=10%",
+      note: "Manual micro-test only: verify price, market, kickoff, and stake cap before acting.",
+    };
+  }
+  return {
+    code: "WATCHLIST_5_10",
+    title: `RESEARCH WATCHLIST >=${CONFIRMED_PCT}%`,
+    note: "Research-only advisory: collect CLV/ROI evidence; no staking gate has passed.",
+  };
 }
 
 // How decisively the edge beats the sharp books' own disagreement. Higher is
@@ -39,7 +47,7 @@ function confidenceLine(confirmation) {
   const ratio = confirmation.edgeOverDispersion;
   if (ratio === undefined) return "";
   if (ratio === null) return "Edge confidence: sharp books in lockstep";
-  return `Edge confidence: ${ratio.toFixed(1)}× the sharp books' disagreement`;
+  return `Edge confidence: ${ratio.toFixed(1)}x the sharp books' disagreement`;
 }
 
 export function formatMispricingMessage(candidate, confirmation) {
@@ -48,25 +56,32 @@ export function formatMispricingMessage(candidate, confirmation) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(candidate.kickoffUtc));
+  const tier = alertTier(confirmation);
+  const providerEv = finite(candidate.providerExpectedValue);
+  const providerLine = providerEv === null ? "" : `Provider EV: ${percent(providerEv)}`;
   const linkNote = candidate.linkDepth === "EVENT"
     ? "\nLink opens the event page; select the exact pick shown above."
     : "";
+
   return [
-    `🚨 CONFIRMED MISPRICING >${CONFIRMED_PCT}%`,
+    tier.title,
     "",
-    `Sport: ${candidate.sportName} — ${candidate.leagueName}`,
+    `Tier: ${tier.code}`,
+    `Sport: ${candidate.sportName} - ${candidate.leagueName}`,
     `Event: ${candidate.participantOne} vs ${candidate.participantTwo}`,
     `Start: ${kickoff} Greece`,
     `Book: ${candidate.bookmaker}`,
     `Pick: ${pickLabel(candidate)}`,
     `Offered: ${candidate.offeredOdds.toFixed(2)}`,
     "",
+    providerLine,
+    `Conservative EV: ${percent(conservativeEv(confirmation))}`,
     `Pinnacle fair: ${confirmation.pinnacleFairOdds.toFixed(2)} | EV: ${percent(confirmation.pinnacleEv)}`,
     `Consensus fair: ${confirmation.consensusFairOdds.toFixed(2)} | EV: ${percent(confirmation.consensusEv)} | ${confirmation.consensusBooks} books`,
     confidenceLine(confirmation),
-    stakeLine(candidate, confirmation),
+    tier.note,
     "",
-    "Verify the displayed price and exact market before betting.",
+    "Verify the displayed price and exact market before recording any micro-test.",
     linkNote,
   ].filter((line) => line !== "").join("\n");
 }

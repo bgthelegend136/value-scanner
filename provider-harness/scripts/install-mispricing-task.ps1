@@ -46,8 +46,9 @@ $Action = New-ScheduledTaskAction `
 
 # Repeat every 15 minutes, indefinitely (3650-day duration avoids the
 # [TimeSpan]::MaxValue bug in New-ScheduledTaskTrigger). The detection tier is
-# cheap -- a no-op cycle spends zero Pinnacle credits; only a fresh >=10%
-# candidate escalates to confirmation. -StartWhenAvailable backfills runs missed
+# cheap -- a no-op cycle spends zero Pinnacle credits; only a fresh >=5%
+# candidate escalates to confirmation. Alerts label >=10% separately as urgent.
+# -StartWhenAvailable backfills runs missed
 # while the machine was asleep.
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
   -RepetitionInterval (New-TimeSpan -Minutes 15) `

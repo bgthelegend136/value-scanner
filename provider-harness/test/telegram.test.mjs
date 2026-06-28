@@ -17,10 +17,12 @@ const candidate = {
   line: "",
   outcome: "1",
   offeredOdds: 2.4,
+  providerExpectedValue: 0.142,
   valueUpdatedAt: "2026-06-25T20:58:00Z",
   link: "https://en.stoiximan.gr/match/123",
   linkDepth: "EVENT",
 };
+
 const confirmation = {
   pinnacleFairOdds: 1.91,
   pinnacleEv: 0.157,
@@ -29,33 +31,51 @@ const confirmation = {
   consensusBooks: 6,
 };
 
-test("formats a Greece-time alert with the exact pick and verification warning", () => {
+test("formats a Greece-time urgent alert with the exact pick and verification warning", () => {
   const text = formatMispricingMessage(candidate, confirmation);
-  assert.match(text, /CONFIRMED MISPRICING/);
-  assert.match(text, /Football — FIFA World Cup/);
+  assert.match(text, /URGENT MISPRICING WATCH/);
+  assert.match(text, /Tier: URGENT_10_PLUS/);
+  assert.match(text, /Football - FIFA World Cup/);
   assert.match(text, /Japan vs Sweden/);
   assert.match(text, /Greece/);
   assert.match(text, /Pick: Japan/);
+  assert.match(text, /Provider EV: \+14\.2%/);
+  assert.match(text, /Conservative EV: \+13\.1%/);
   assert.match(text, /Pinnacle fair: 1\.91 \| EV: \+15\.7%/);
   assert.match(text, /Consensus fair: 1\.95 \| EV: \+13\.1% \| 6 books/);
   assert.match(text, /Verify the displayed price/);
+  assert.match(text, /Manual micro-test only/);
   // EVENT-depth link must tell the user to find the exact pick.
   assert.match(text, /select the exact pick/);
 });
 
-test("suggests a quarter-Kelly stake from the conservative edge", () => {
-  // minimumConfirmedEv +5% at odds 2.40 -> f* = 0.05/1.40 = 0.0357,
-  // quarter-Kelly = 0.0089 -> 0.9% of bankroll (below the 2% cap).
+test("formats 5 to 10 percent confirmed EV as research watchlist without stake sizing", () => {
+  const text = formatMispricingMessage(candidate, {
+    ...confirmation,
+    pinnacleEv: 0.082,
+    consensusEv: 0.061,
+    minimumConfirmedEv: 0.061,
+    edgeOverDispersion: 2.4,
+  });
+  assert.match(text, /RESEARCH WATCHLIST/);
+  assert.match(text, /Tier: WATCHLIST_5_10/);
+  assert.match(text, /Conservative EV: \+6\.1%/);
+  assert.match(text, /Research-only advisory/);
+  assert.doesNotMatch(text, /Suggested stake/);
+});
+
+test("urgent alerts keep manual micro-test wording without stake sizing", () => {
   const text = formatMispricingMessage(
     { ...candidate, offeredOdds: 2.4 },
-    { ...confirmation, minimumConfirmedEv: 0.05 },
+    { ...confirmation, minimumConfirmedEv: 0.13 },
   );
-  assert.match(text, /Suggested stake: 0\.9% of bankroll \(¼-Kelly\)/);
+  assert.match(text, /Manual micro-test only/);
+  assert.doesNotMatch(text, /Suggested stake/);
 });
 
 test("shows the edge-over-dispersion confidence when present", () => {
   const confident = formatMispricingMessage(candidate, { ...confirmation, edgeOverDispersion: 12.3 });
-  assert.match(confident, /Edge confidence: 12\.3× the sharp books' disagreement/);
+  assert.match(confident, /Edge confidence: 12\.3x the sharp books' disagreement/);
 
   const lockstep = formatMispricingMessage(candidate, { ...confirmation, edgeOverDispersion: null });
   assert.match(lockstep, /Edge confidence: sharp books in lockstep/);

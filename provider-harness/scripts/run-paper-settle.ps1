@@ -6,7 +6,7 @@ $Stamp = Get-Date -Format 'yyyy-MM-dd'
 $LogPath = Join-Path $LogDir "paper-settle-$Stamp.log"
 
 # Settlement: update completed paper bets and sent Telegram alerts from final
-# scores. Sends nothing to Telegram and never touches the 10% live-alert floor.
+# scores. Sends nothing to Telegram and never touches the Telegram alert floor.
 # fd-settle runs first to settle soccer for FREE via football-data.org, so the
 # subsequent The Odds API `settle` only spends credits on non-soccer leftovers.
 Push-Location $HarnessRoot

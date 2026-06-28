@@ -183,7 +183,7 @@ function printChecklist() {
   console.log("  [ ] settlement join works: football-data.org covers the leagues (free) for outcomes\n");
   console.log("  Then the ONLY valid goal for the spend is: calibrate the de-vig / fair-value");
   console.log("  engine (Brier / log-loss / reliability, out-of-sample temporal split) so you can");
-  console.log("  lower the 10% floor with evidence. The edge itself stays a FORWARD-paper question.\n");
+  console.log("  calibrate the alert tiers with evidence. The edge itself stays a FORWARD-paper question.\n");
 }
 
 async function main() {

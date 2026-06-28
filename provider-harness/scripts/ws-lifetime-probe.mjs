@@ -1,8 +1,9 @@
 // Measurement-only Odds-API.io WebSocket probe.
 //
 // It records how long Stoiximan/Novibet WebSocket prices remain strict confirmed
-// +EV under the same rule as Telegram alerts: Pinnacle fair probability plus
-// 3-book consensus EV must both clear the 10% floor. It sends no alerts.
+// +EV under the same confirmation rule as Telegram alerts: Pinnacle fair
+// probability plus 3-book consensus EV must both clear the shared EV floor.
+// It sends no alerts.
 
 import { access, appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";

@@ -357,7 +357,7 @@ test("legacy ws probe records a raw high-price lifecycle when an update falls be
   assert.equal(closed[0].endReason, "UPDATED_BELOW_THRESHOLD");
 });
 
-test("strict EV ws probe opens and closes only around confirmed 10%+ EV", async () => {
+test("strict EV ws probe opens and closes only around confirmed EV", async () => {
   const state = createLifetimeState();
   const options = {
     referenceClient: referenceClient(),

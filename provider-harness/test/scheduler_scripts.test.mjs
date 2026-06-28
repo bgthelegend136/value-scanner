@@ -9,7 +9,7 @@ test("production installer repeats every 15 minutes and prevents overlapping run
   );
 
   // Two-tier cadence: a frequent cheap detection pass, escalating only on a
-  // fresh >=10% candidate (see runMispricingScan detection tier).
+  // fresh >=5% watchlist candidate (see runMispricingScan detection tier).
   assert.match(source, /-RepetitionInterval/);
   assert.match(source, /New-TimeSpan -Minutes 15/);
   assert.match(source, /-Once\b/);

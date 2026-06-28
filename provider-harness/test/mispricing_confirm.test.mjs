@@ -68,8 +68,8 @@ test("a confirmed alert exposes edge-over-dispersion confidence above 1", () => 
 });
 
 test("rejects an edge that sits within the consensus books' disagreement", () => {
-  // Two-way market. Pinnacle and the consensus median both clear the 10% EV
-  // floor (fair ~0.5, offered 2.4 -> EV +20%), but the three consensus books
+  // Two-way market. Pinnacle and the consensus median both clear the EV floor
+  // (fair ~0.5, offered 2.4 -> EV +20%), but the three consensus books
   // wildly disagree on the home fair probability (~0.61 / ~0.36 / ~0.50), so the
   // ~8pt edge is smaller than their ~12pt spread: it is statistical noise.
   const twoWayHome = { ...footballHome, sportSlug: "basketball", offeredOdds: 2.4 };
@@ -93,7 +93,25 @@ test("rejects an edge that sits within the consensus books' disagreement", () =>
   assert.ok(result.edgeOverDispersion < 1);
 });
 
-test("an EV just below the 10 percent floor is rejected", () => {
+test("an EV just below the 5 percent watchlist floor is rejected", () => {
+  const twoWayHome = { ...footballHome, sportSlug: "basketball", offeredOdds: 2.08 };
+  const result = confirmCandidate(
+    twoWayHome,
+    referenceEvent,
+    [
+      ...market2("pinnacle", 1.9, 1.9),
+      ...market2("betsson", 1.9, 1.9),
+      ...market2("unibet", 1.9, 1.9),
+      ...market2("williamhill", 1.9, 1.9),
+    ],
+    { now },
+  );
+  assert.ok(result.pinnacleEv < 0.05);
+  assert.notEqual(result.status, "CONFIRMED");
+  assert.equal(result.reason, "PINNACLE_EV_BELOW_MIN");
+});
+
+test("an EV between 5 and 10 percent is confirmed as a research watchlist candidate", () => {
   const twoWayHome = { ...footballHome, sportSlug: "basketball", offeredOdds: 2.18 };
   const result = confirmCandidate(
     twoWayHome,
@@ -107,9 +125,9 @@ test("an EV just below the 10 percent floor is rejected", () => {
     { now },
   );
   // fair ~0.5 each -> EV ~ 2.18 * 0.5 - 1 = 0.09
+  assert.ok(result.pinnacleEv > 0.05);
   assert.ok(result.pinnacleEv < 0.1);
-  assert.notEqual(result.status, "CONFIRMED");
-  assert.equal(result.reason, "PINNACLE_EV_BELOW_MIN");
+  assert.equal(result.status, "CONFIRMED");
 });
 
 test("rejects fewer than three consensus books, stale Pinnacle, and missing Pinnacle", () => {
