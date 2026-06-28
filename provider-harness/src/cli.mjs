@@ -44,6 +44,7 @@ import { parseLegPick, legFairProbabilities } from "./boost_legs.mjs";
 import { analyzeBoostMix, parseMixLeg, priceMixLeg } from "./boost_mix.mjs";
 import { createFootballDataClient } from "./football_data_client.mjs";
 import { fdCompetitionFor, synthesizeFdScoreEvents } from "./football_data_settle.mjs";
+import { buildProfitEngineReport, profitEngineRows } from "./profit_engine.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -1246,6 +1247,7 @@ async function runResearchStatus({ out, reportsDir, now }) {
 }
 
 const VALUE_FLOW_COLUMNS = ["scope", "key", "value"];
+const PROFIT_ENGINE_COLUMNS = ["scope", "key", "value"];
 
 function increment(map, key) {
   map.set(key, (map.get(key) ?? 0) + 1);
@@ -1338,6 +1340,60 @@ async function runValueFlowReport({ out, reportsDir, now }) {
   out(`Value-flow report: paper=${paperRows.length}, audit=${auditRows.length}, latestScanRows=${latestScanRows.length}\n`);
   if (topRejection) out(`Top rejection: ${topRejection[0]} (${topRejection[1]})\n`);
   out("Wrote value-flow-report.csv and value-flow-report.json\n");
+  return 0;
+}
+
+function percentOrNA(value) {
+  return value === null || value === undefined ? "N/A" : `${signed(value * 100, 2)}%`;
+}
+
+async function runProfitEngine({ args, out, reportsDir, now }) {
+  const paperRows = await readCsvIfPresent(join(reportsDir, "paper-bets.csv"));
+  const liveFeedStatsRows = await readCsvIfPresent(join(reportsDir, "ws-live-feed-stats.csv"));
+  const liveStatusRows = await readCsvIfPresent(join(reportsDir, "live-event-status.csv"));
+  const liveTrainingRows = await readCsvIfPresent(join(reportsDir, "live-training-observations.csv"));
+  const liveAuditRows = await readCsvIfPresent(join(reportsDir, "ws-live-shadow-audit.csv"));
+  const lifetimeRows = await readCsvIfPresent(join(reportsDir, "ws-lifetime-log.csv"));
+  const bankroll = optionValue(args, "bankroll", "");
+  const maxStake = optionValue(args, "max-stake", "");
+  const kellyFraction = numericArg(args, "kelly-fraction", 0.25);
+  const stakeCapPct = numericArg(args, "stake-cap-pct", 2);
+  const report = buildProfitEngineReport({
+    generatedAt: now().toISOString(),
+    paperRows,
+    liveFeedStatsRows,
+    liveStatusRows,
+    liveTrainingRows,
+    liveAuditRows,
+    lifetimeRows,
+    bankroll,
+    maxStake,
+    kellyFraction,
+    stakeCapFraction: stakeCapPct / 100,
+  });
+  const rows = profitEngineRows(report);
+
+  await writeCsv(join(reportsDir, "profit-engine-report.csv"), rows, PROFIT_ENGINE_COLUMNS);
+  await writeFile(
+    join(reportsDir, "profit-engine-report.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+    "utf8",
+  );
+
+  out(
+    [
+      `Profit engine: ${report.capital.readiness}`,
+      `VALUE CLV captured: ${report.paper.valueClvCaptured}`,
+      `Main MATCH_RESULT VALUE CLV: ${report.paper.mainValueClvCaptured}`,
+      `VALUE avg CLV: ${percentOrNA(report.signal.valueAverageClv)}`,
+      `CONTROL avg CLV: ${percentOrNA(report.signal.controlAverageClv)}`,
+      `Paper ROI: ${percentOrNA(report.paper.roi)} (${report.paper.settled} settled)`,
+      `Live market messages: ${report.live.marketMessageRows}`,
+      `Live training rows: ${report.live.trainingRows}`,
+      `Warnings: ${report.warnings.join(", ") || "none"}`,
+      "Wrote profit-engine-report.csv and profit-engine-report.json",
+    ].join("\n") + "\n",
+  );
   return 0;
 }
 // Capture closing-line value for sent mispricing alerts. Reuses the same Pinnacle
@@ -1916,6 +1972,14 @@ export async function runCli(argv, deps = {}) {
     if (command === "value-flow-report") {
       return await runValueFlowReport({ out, reportsDir, now });
     }
+    if (command === "profit-engine") {
+      return await runProfitEngine({
+        args: rest,
+        out,
+        reportsDir,
+        now,
+      });
+    }
     if (command === "forensic-audit") {
       const { runForensicAudit } = await import("../scripts/forensic-audit.mjs");
       return await runForensicAudit({
@@ -2001,7 +2065,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

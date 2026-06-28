@@ -42,13 +42,14 @@ const STRICT_CSV_COLUMNS = [
 const STRICT_AUDIT_COLUMNS = [
   "observedAt", "seq", "providerEventId", "referenceEventId", "sportKey",
   "bookmaker", "match", "market", "line", "outcome", "offeredOdds",
-  "status", "reason", "pinnacleEv", "consensusEv", "consensusBooks",
+  "maxBet", "status", "reason", "pinnacleEv", "consensusEv", "consensusBooks",
   "minimumConfirmedEv", "edgeOverDispersion",
 ];
 const LIVE_TRAINING_COLUMNS = [
   "observedAt", "seq", "providerEventId", "referenceEventId", "sportKey",
   "liveStatus", "homeScore", "awayScore",
   "bookmaker", "match", "market", "line", "outcome", "offeredOdds",
+  "maxBet",
   "pinnacleFairProbability", "pinnacleFairOdds", "pinnacleEv",
   "consensusFairProbability", "consensusFairOdds", "consensusEv", "consensusBooks",
   "minimumConfirmedEv", "edgeOverDispersion",
@@ -95,6 +96,11 @@ export function targetBookmakersFromArgv(argv) {
 function finiteOdds(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
+}
+
+function finitePositive(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function text(value) {
@@ -205,6 +211,7 @@ function extractMlSelections(message) {
           line: "",
           outcome,
           decimalOdds,
+          maxBet: finitePositive(odds.max),
           quoteUpdatedAt: market.updatedAt ?? "",
         });
       }
@@ -230,6 +237,7 @@ function extractTotalsSelections(message) {
           line: String(line),
           outcome,
           decimalOdds,
+          maxBet: finitePositive(odds.max),
           quoteUpdatedAt: market.updatedAt ?? "",
         });
       }
@@ -282,6 +290,7 @@ function extractWsCandidates(message, { targetBookmakers = TARGET_BOOKMAKERS, no
     line: selection.line,
     outcome: selection.outcome,
     offeredOdds: selection.decimalOdds,
+    maxBet: selection.maxBet,
     valueUpdatedAt,
     receivedAt: valueUpdatedAt,
     link: "",
@@ -392,6 +401,7 @@ function strictAuditRow(candidate, { sportKey = "", confirmation = {}, timestamp
     line: candidate.line,
     outcome: candidate.outcome,
     offeredOdds: formatNumber(candidate.offeredOdds),
+    maxBet: formatNumber(candidate.maxBet),
     status: confirmation.status ?? "REJECTED",
     reason: confirmation.reason ?? "",
     pinnacleEv: formatNumber(confirmation.pinnacleEv),
@@ -494,6 +504,7 @@ function liveTrainingRow(candidate, {
     line: candidate.line,
     outcome: candidate.outcome,
     offeredOdds: formatNumber(candidate.offeredOdds),
+    maxBet: formatNumber(candidate.maxBet),
     pinnacleFairProbability: formatNumber(confirmation.pinnacleFairProbability, 6),
     pinnacleFairOdds: formatNumber(confirmation.pinnacleFairOdds),
     pinnacleEv: formatNumber(confirmation.pinnacleEv),

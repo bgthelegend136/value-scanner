@@ -34,6 +34,23 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-28 (live/profit-engine audit).**
+> Added offline `node src/cli.mjs profit-engine`, writing
+> `reports/profit-engine-report.csv` and `.json`. It combines paper ROI,
+> VALUE/CONTROL CLV separation, live WebSocket efficiency, and staking/liquidity
+> diagnostics. It never loads API keys or sends bets. Live WebSocket parsing now
+> preserves provider `max` as `maxBet` in live audit/training rows, so future
+> live observations can be checked against liquidity/limits instead of EV alone.
+> Current verdict from real reports: **RESEARCH_ONLY**. Prematch signal is still
+> good (VALUE avg CLV **+2.18%**, CONTROL **-1.88%**, main VALUE
+> `MATCH_RESULT` **+2.28%**), but realized ROI is not decision-grade (**7**
+> settled only) and live is not producing training data (**690** feed rows,
+> **0** market/odds messages, **0** training rows, **0** liquidity rows). Do not
+> treat live betting as an acceleration source until the Odds-API.io feed emits
+> `created`/`updated` market messages. Official WebSocket docs allow the current
+> syntax, so the likely blocker is coverage/filter/account-selected bookmakers,
+> not URL construction.
+>
 > **Status update 2026-06-28 (16% Codex window operational runbook).**
 > Added `docs/superpowers/runbooks/2026-06-28-value-clv-collection-runbook.md`
 > as the short-window operating plan. The correct next action is disciplined

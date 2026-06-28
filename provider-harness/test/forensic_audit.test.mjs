@@ -115,9 +115,12 @@ test("forensic audit separates row volume from independent evidence", async () =
   assert.equal(report.live.trainingRows, 0);
   assert.equal(report.live.feedStatsRows, 1);
   assert.equal(report.live.feedStatsByType.score, 1);
+  assert.equal(report.live.marketMessageRows, 0);
+  assert.equal(report.live.trainingConversionRate, null);
   assert.equal(report.runtime.websocketProbeProcesses, 2);
   assert.ok(report.findings.some((finding) => finding.code === "ROW_VOLUME_NOT_INDEPENDENT"));
   assert.ok(report.findings.some((finding) => finding.code === "LIVE_STATUS_WITHOUT_TRAINING"));
+  assert.ok(report.findings.some((finding) => finding.code === "LIVE_FEED_NO_MARKET_MESSAGES"));
   assert.ok(report.findings.some((finding) => finding.code === "MULTIPLE_WEBSOCKET_PROBES"));
   assert.doesNotMatch(JSON.stringify(report), /secret|apiKey|sk-/i);
 });

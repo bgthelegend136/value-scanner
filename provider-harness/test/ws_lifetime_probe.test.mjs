@@ -91,12 +91,14 @@ function wsMessage({
   homeOdds = "2.40",
   drawOdds = "3.05",
   awayOdds = "4.05",
+  maxBet = "250",
   type = "created",
 } = {}) {
   const odds = {};
   if (homeOdds !== null) odds.home = homeOdds;
   if (drawOdds !== null) odds.draw = drawOdds;
   if (awayOdds !== null) odds.away = awayOdds;
+  if (maxBet !== null) odds.max = maxBet;
   return {
     type,
     seq,
@@ -333,6 +335,7 @@ test("live training records EV-banded control and value observations", async () 
   assert.equal(home.referenceEventId, "ref-501");
   assert.equal(home.bookmaker, "Stoiximan");
   assert.equal(home.market, "MATCH_RESULT");
+  assert.equal(home.maxBet, "250.0000");
   assert.match(home.pinnacleFairProbability, /^\d+\.\d{6}$/u);
   assert.match(home.minimumConfirmedEv, /^-/u);
 });

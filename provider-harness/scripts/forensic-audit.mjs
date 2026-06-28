@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import { resolveEnvPath } from "../src/cli.mjs";
 import { readCsv, writeCsv } from "../src/csv.mjs";
 import { loadEnvFile, requireKey } from "../src/env.mjs";
+import { summarizeLiveEfficiency } from "../src/profit_engine.mjs";
 import { createTheOddsApiClient } from "../src/theodds_client.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -170,12 +171,16 @@ function summarizeScan(rows, path) {
 }
 
 function summarizeLive({ statusRows, trainingRows, feedStatsRows, auditRows, lifetimeRows }) {
+  const efficiency = summarizeLiveEfficiency({
+    liveStatusRows: statusRows,
+    liveTrainingRows: trainingRows,
+    liveFeedStatsRows: feedStatsRows,
+    liveAuditRows: auditRows,
+    lifetimeRows,
+  });
   return {
-    statusRows: statusRows.length,
-    trainingRows: trainingRows.length,
-    feedStatsRows: feedStatsRows.length,
+    ...efficiency,
     shadowAuditRows: auditRows.length,
-    lifetimeRows: lifetimeRows.length,
     trainingByTier: countBy(trainingRows, (row) => row.sampleTier),
     trainingByMarket: countBy(trainingRows, (row) => row.market),
     statusByType: countBy(statusRows, (row) => row.eventStatus),
@@ -293,6 +298,20 @@ function evaluateFindings(report) {
       "Live WebSocket receives score/status but no EV training rows",
       "The live connection is alive, but no odds candidate has made it through mapping, reference matching, and EV-band sampling yet.",
       { statusRows: report.live.statusRows, trainingRows: report.live.trainingRows },
+    );
+  }
+  if (report.live.feedStatsRows > 0 && report.live.marketMessageRows === 0) {
+    addFinding(
+      findings,
+      "HIGH",
+      "LIVE_FEED_NO_MARKET_MESSAGES",
+      "Live WebSocket feed produced no odds market messages",
+      "The live task can be connected and still produce no candidate observations. Investigate provider filters such as sport/status/markets before treating live as an acceleration source.",
+      {
+        feedStatsRows: report.live.feedStatsRows,
+        marketMessageRows: report.live.marketMessageRows,
+        feedStatsByType: report.live.feedStatsByType,
+      },
     );
   }
   if (report.runtime.websocketProbeProcesses > 1) {
@@ -464,6 +483,8 @@ function renderMarkdown(report) {
     `Status rows: ${report.live.statusRows}`,
     `Training rows: ${report.live.trainingRows}`,
     `Feed stats rows: ${report.live.feedStatsRows}`,
+    `Market message rows: ${report.live.marketMessageRows}`,
+    `Training conversion rate: ${report.live.trainingConversionRate === null ? "N/A" : report.live.trainingConversionRate.toFixed(4)}`,
     `Shadow audit rows: ${report.live.shadowAuditRows}`,
     `Lifetime rows: ${report.live.lifetimeRows}`,
     `WebSocket probe processes: ${report.runtime.websocketProbeProcesses}`,

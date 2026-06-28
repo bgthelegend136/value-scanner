@@ -1,0 +1,235 @@
+import {
+  summarizeClvCalibration,
+  summarizePaperBets,
+  summarizeResearchStatus,
+} from "./paper.mjs";
+import { kellyStake } from "./staking.mjs";
+
+const VALUE_TIERS = new Set(["VALUE", "VALUE_CHECK", "SUSPICIOUS"]);
+const MARKET_MESSAGE_TYPES = new Set(["created", "updated", "deleted", "no_markets"]);
+const CANDIDATE_MESSAGE_TYPES = new Set(["created", "updated"]);
+
+function optionalNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sumNumeric(rows, key) {
+  return rows.reduce((sum, row) => sum + (optionalNumber(row[key]) ?? 0), 0);
+}
+
+function average(values) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function calibrationRow(calibration, scope, key) {
+  return calibration.rows.find((row) => row.scope === scope && row.key === key) ?? null;
+}
+
+function valueClvRows(rows) {
+  return rows.filter((row) =>
+    VALUE_TIERS.has(String(row.tier ?? "")) &&
+    optionalNumber(row.clv) !== null);
+}
+
+function controlClvRows(rows) {
+  return rows.filter((row) =>
+    String(row.tier ?? "") === "CONTROL" &&
+    optionalNumber(row.clv) !== null);
+}
+
+function averageClv(rows) {
+  return average(rows
+    .map((row) => optionalNumber(row.clv))
+    .filter((value) => value !== null));
+}
+
+function stakeFractions(rows, { kellyFraction, stakeCapFraction }) {
+  return rows
+    .map((row) => {
+      const offeredOdds = optionalNumber(row.decimalOdds);
+      const edge = optionalNumber(row.ev);
+      if (offeredOdds === null || edge === null) return null;
+      return kellyStake({
+        offeredOdds,
+        edge,
+        fraction: kellyFraction,
+        cap: stakeCapFraction,
+      });
+    })
+    .filter((value) => value !== null);
+}
+
+export function summarizeLiveEfficiency({
+  liveFeedStatsRows = [],
+  liveStatusRows = [],
+  liveTrainingRows = [],
+  liveAuditRows = [],
+  lifetimeRows = [],
+} = {}) {
+  const maxBetValues = liveTrainingRows
+    .map((row) => optionalNumber(row.maxBet))
+    .filter((value) => value !== null);
+  const marketMessageRows = liveFeedStatsRows.filter((row) =>
+    MARKET_MESSAGE_TYPES.has(String(row.messageType ?? ""))).length;
+  const candidateMessageRows = liveFeedStatsRows.filter((row) =>
+    CANDIDATE_MESSAGE_TYPES.has(String(row.messageType ?? ""))).length;
+  const trainingRowsFromFeed = sumNumeric(liveFeedStatsRows, "trainingRows");
+  const auditRowsFromFeed = sumNumeric(liveFeedStatsRows, "auditRows");
+  const closedRowsFromFeed = sumNumeric(liveFeedStatsRows, "closedRows");
+  const trainingRows = Math.max(liveTrainingRows.length, trainingRowsFromFeed);
+  const auditRows = Math.max(liveAuditRows.length, auditRowsFromFeed);
+  const lifetimeCount = Math.max(lifetimeRows.length, closedRowsFromFeed);
+
+  return {
+    feedStatsRows: liveFeedStatsRows.length,
+    statusRows: liveStatusRows.length,
+    trainingRows,
+    auditRows,
+    lifetimeRows: lifetimeCount,
+    marketMessageRows,
+    candidateMessageRows,
+    scoreRows: liveFeedStatsRows.filter((row) => row.messageType === "score").length,
+    statusMessageRows: liveFeedStatsRows.filter((row) => row.messageType === "status").length,
+    welcomeRows: liveFeedStatsRows.filter((row) => row.messageType === "welcome").length,
+    liquidityRows: maxBetValues.length,
+    averageMaxBet: average(maxBetValues),
+    maxObservedBetLimit: maxBetValues.length ? Math.max(...maxBetValues) : null,
+    trainingConversionRate: candidateMessageRows > 0 ? trainingRows / candidateMessageRows : null,
+    feedToTrainingRate: liveFeedStatsRows.length > 0 ? trainingRows / liveFeedStatsRows.length : null,
+  };
+}
+
+function readiness({ valueCaptured, settled, live, warnings }) {
+  if (valueCaptured < 200) return "RESEARCH_ONLY";
+  if (settled < 200) return "CLV_READY_ROI_NOT_READY";
+  if (live.trainingRows === 0) return "PREMATCH_ONLY_READY_LIVE_NOT_READY";
+  if (warnings.includes("LIMITS_LIQUIDITY_NOT_MEASURED")) return "PAPER_READY_LIMITS_UNKNOWN";
+  return "READY_FOR_TINY_STAKES";
+}
+
+export function buildProfitEngineReport({
+  generatedAt = new Date().toISOString(),
+  paperRows = [],
+  liveFeedStatsRows = [],
+  liveStatusRows = [],
+  liveTrainingRows = [],
+  liveAuditRows = [],
+  lifetimeRows = [],
+  bankroll = null,
+  maxStake = null,
+  kellyFraction = 0.25,
+  stakeCapFraction = 0.02,
+} = {}) {
+  const paperSummary = summarizePaperBets(paperRows);
+  const researchRows = summarizeResearchStatus(paperRows);
+  const overallResearch = researchRows.find((row) => row.scope === "overall" && row.key === "all");
+  const mainResearch = researchRows.find((row) => row.scope === "main" && row.key === "MATCH_RESULT");
+  const calibration = summarizeClvCalibration(paperRows);
+  const valueRow = calibrationRow(calibration, "tier", "VALUE");
+  const controlRow = calibrationRow(calibration, "tier", "CONTROL");
+  const mainRow = calibration.mainScore;
+  const mainValueAverageClv = averageClv(valueClvRows(paperRows)
+    .filter((row) => row.market === "MATCH_RESULT"));
+  const live = summarizeLiveEfficiency({
+    liveFeedStatsRows,
+    liveStatusRows,
+    liveTrainingRows,
+    liveAuditRows,
+    lifetimeRows,
+  });
+
+  const configuredBankroll = optionalNumber(bankroll);
+  const configuredMaxStake = optionalNumber(maxStake);
+  const maxStakeFraction = configuredBankroll && configuredMaxStake
+    ? Math.min(stakeCapFraction, configuredMaxStake / configuredBankroll)
+    : stakeCapFraction;
+  const sampleFractions = stakeFractions(valueClvRows(paperRows), {
+    kellyFraction,
+    stakeCapFraction: maxStakeFraction,
+  });
+
+  const warnings = [];
+  const valueCaptured = overallResearch?.valueClvCaptured ?? 0;
+  if (valueCaptured < 200) warnings.push("VALUE_CLV_BELOW_200");
+  if (paperSummary.settled < 200) warnings.push("ROI_SAMPLE_TOO_SMALL");
+  if (live.feedStatsRows > 0 && live.marketMessageRows === 0) {
+    warnings.push("LIVE_FEED_HAS_NO_MARKET_MESSAGES");
+  }
+  if (live.statusRows > 0 && live.trainingRows === 0) warnings.push("LIVE_STATUS_WITHOUT_TRAINING");
+  if (live.marketMessageRows > 0 && live.trainingRows === 0) warnings.push("LIVE_MARKETS_WITHOUT_TRAINING");
+  if ((controlRow?.averageClv ?? 0) > 0) warnings.push("CONTROL_POSITIVE_DRIFT");
+  if (mainValueAverageClv !== null && mainValueAverageClv <= 0) warnings.push("MAIN_SIGNAL_NOT_POSITIVE");
+  if (live.liquidityRows === 0) warnings.push("LIMITS_LIQUIDITY_NOT_MEASURED");
+  if (!configuredBankroll || !configuredMaxStake) warnings.push("CAPITAL_CONFIG_INCOMPLETE");
+
+  const capital = {
+    bankroll: configuredBankroll,
+    maxStake: configuredMaxStake,
+    kellyFraction,
+    stakeCapFraction: maxStakeFraction,
+    sampleAverageStakeFraction: average(sampleFractions),
+    sampleMaxStakeFraction: sampleFractions.length ? Math.max(...sampleFractions) : null,
+    sampleAverageStake: configuredBankroll && sampleFractions.length
+      ? average(sampleFractions) * configuredBankroll
+      : null,
+    readiness: readiness({
+      valueCaptured,
+      settled: paperSummary.settled,
+      live,
+      warnings,
+    }),
+  };
+
+  return {
+    generatedAt,
+    paper: {
+      rows: paperSummary.total,
+      pending: paperSummary.pending,
+      settled: paperSummary.settled,
+      settledStake: paperSummary.settledStake,
+      profit: paperSummary.profit,
+      roi: paperSummary.roi,
+      valueClvCaptured: overallResearch?.valueClvCaptured ?? 0,
+      mainValueClvCaptured: mainResearch?.valueClvCaptured ?? 0,
+      valuePending: overallResearch?.valuePending ?? 0,
+      controlClvCaptured: overallResearch?.controlClvCaptured ?? 0,
+      uniqueSelectionCount: overallResearch?.uniqueSelectionCount ?? 0,
+      missingValueClvTo200: overallResearch?.missingValueClvTo200 ?? 200,
+      missingValueClvTo300: overallResearch?.missingValueClvTo300 ?? 300,
+    },
+    signal: {
+      sampleSize: calibration.sampleSize,
+      valueAverageClv: valueRow?.averageClv ?? null,
+      controlAverageClv: controlRow?.averageClv ?? null,
+      mainAverageClv: mainRow?.averageClv ?? null,
+      mainValueAverageClv,
+      regressionSlope: calibration.regression.slope,
+      regressionRSquared: calibration.regression.rSquared,
+    },
+    live,
+    capital,
+    warnings,
+  };
+}
+
+function valueForCsv(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(6);
+  return String(value);
+}
+
+export function profitEngineRows(report) {
+  const rows = [];
+  function add(scope, key, value) {
+    rows.push({ scope, key, value: valueForCsv(value) });
+  }
+
+  for (const [key, value] of Object.entries(report.paper)) add("paper", key, value);
+  for (const [key, value] of Object.entries(report.signal)) add("signal", key, value);
+  for (const [key, value] of Object.entries(report.live)) add("live", key, value);
+  for (const [key, value] of Object.entries(report.capital)) add("capital", key, value);
+  for (const warning of report.warnings) add("warning", warning, "1");
+  return rows;
+}
