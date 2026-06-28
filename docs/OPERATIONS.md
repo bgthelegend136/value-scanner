@@ -34,7 +34,12 @@ Expected local Windows scheduled tasks:
 | `Bet-Live-Shadow` | Odds-API.io live diagnostic feed. |
 
 If live shadow produces only `welcome` rows and no market messages, treat it as
-diagnostic-only and use `live-updated-poll` for fallback measurement.
+diagnostic-only and use `live-updated-poll` for fallback measurement. The daily
+report distinguishes:
+
+- `fallbackRecommended=true`: WebSocket is observed but has no market messages
+  and no `/odds/updated` fallback rows exist yet.
+- `fallbackActive=true`: `/odds/updated` has produced feed or training rows.
 
 ## Report Meanings
 
@@ -55,6 +60,8 @@ diagnostic-only and use `live-updated-poll` for fallback measurement.
   from h2h readiness.
 - `LIVE_WS_HAS_NO_MARKET_MESSAGES` means the WebSocket is not usable for live
   training or staking.
+- `LIVE_UPDATED_POLL_FALLBACK_RECOMMENDED` means run `live-updated-poll` if live
+  measurement is still needed.
 - `VALUE_MATCH_RESULT_*_BELOW_200` means h2h sample is still research-only.
 
 ## Staking Simulation Policy
@@ -80,6 +87,17 @@ Supported policies:
 
 The daily exposure cap is enforced per `firstSeenAt` date. It limits simulated
 stake volume; it does not approve live staking.
+
+## Live Fallback Command
+
+When `daily-decision-report` includes `RUN_LIVE_UPDATED_POLL_FALLBACK`, run:
+
+```powershell
+node src/cli.mjs live-updated-poll --sport=Football --bookmakers=Stoiximan,Novibet --markets=ML,Totals --interval-seconds=45 --duration-minutes=30
+```
+
+Fallback rows are marked with `source=updated_poll` in
+`reports/live-training-observations.csv`.
 
 ## Credit Spending Policy
 

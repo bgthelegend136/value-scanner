@@ -50,6 +50,8 @@ No command in the current roadmap enables real-money staking.
 - Event-level dedupe prevents one match from pretending to be many independent
   samples.
 - Live WebSocket output is not useful until it emits real market messages.
+- `/odds/updated` fallback can support measurement, but it is not equivalent to
+  a stable WebSocket feed or liquidity evidence.
 
 ## What Can Change A Gate
 

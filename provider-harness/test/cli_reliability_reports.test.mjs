@@ -272,3 +272,93 @@ test("daily-decision-report summarizes blockers and next action from offline rep
   assert.ok(json.blockers.includes("VALUE_MATCH_RESULT_SETTLED_BELOW_200"));
   assert.ok(json.nextActions.includes("RUN_PROFITABILITY_REPORT"));
 });
+
+test("daily-decision-report treats updated-poll rows as active live fallback instead of recommending fallback again", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "daily-decision-live-fallback-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "value-1", clv: "0.040000", profit: "1.0000" }),
+  ], PAPER_COLUMNS);
+  await writeCsv(join(reportsDir, "ws-live-feed-stats.csv"), [
+    { observedAt: "2026-06-28T12:00:00Z", messageType: "welcome", seq: "", providerEventId: "", bookmaker: "", markets: "", auditRows: "0", trainingRows: "0", closedRows: "0", rejectionReasons: "" },
+    { observedAt: "2026-06-28T12:01:00Z", messageType: "updated_poll", seq: "", providerEventId: "live-1", bookmaker: "Stoiximan", markets: "MATCH_RESULT", auditRows: "0", trainingRows: "1", closedRows: "0", rejectionReasons: "" },
+  ], ["observedAt", "messageType", "seq", "providerEventId", "bookmaker", "markets", "auditRows", "trainingRows", "closedRows", "rejectionReasons"]);
+  await writeCsv(join(reportsDir, "live-training-observations.csv"), [
+    {
+      observedAt: "2026-06-28T12:01:00Z",
+      seq: "",
+      providerEventId: "live-1",
+      referenceEventId: "",
+      sportKey: "",
+      liveStatus: "",
+      homeScore: "",
+      awayScore: "",
+      bookmaker: "Stoiximan",
+      match: "Spain - Italy",
+      market: "MATCH_RESULT",
+      line: "",
+      outcome: "1",
+      offeredOdds: "2.0000",
+      maxBet: "",
+      pinnacleFairProbability: "",
+      pinnacleFairOdds: "",
+      pinnacleEv: "",
+      consensusFairProbability: "",
+      consensusFairOdds: "",
+      consensusEv: "",
+      consensusBooks: "",
+      minimumConfirmedEv: "",
+      edgeOverDispersion: "",
+      sampleTier: "LIVE_UNCONFIRMED",
+      confirmationStatus: "UNCONFIRMED",
+      rejectionReason: "",
+      source: "updated_poll",
+    },
+  ], [
+    "observedAt", "seq", "providerEventId", "referenceEventId", "sportKey",
+    "liveStatus", "homeScore", "awayScore", "bookmaker", "match", "market",
+    "line", "outcome", "offeredOdds", "maxBet", "pinnacleFairProbability",
+    "pinnacleFairOdds", "pinnacleEv", "consensusFairProbability",
+    "consensusFairOdds", "consensusEv", "consensusBooks", "minimumConfirmedEv",
+    "edgeOverDispersion", "sampleTier", "confirmationStatus", "rejectionReason",
+    "source",
+  ]);
+
+  const { code } = await runOffline("daily-decision-report", reportsDir);
+
+  assert.equal(code, 0);
+  const markdown = await readFile(join(reportsDir, "daily-decision-report.md"), "utf8");
+  assert.match(markdown, /Live source: updated_poll/u);
+  assert.match(markdown, /Fallback active: true/u);
+  assert.doesNotMatch(markdown, /RUN_LIVE_UPDATED_POLL_FALLBACK/u);
+
+  const json = JSON.parse(await readFile(join(reportsDir, "daily-decision-report.json"), "utf8"));
+  assert.equal(json.live.fallbackActive, true);
+  assert.equal(json.live.fallbackRecommended, false);
+  assert.equal(json.live.updatedPollTrainingRows, 1);
+  assert.equal(json.live.liveDataSource, "updated_poll");
+  assert.ok(!json.nextActions.includes("RUN_LIVE_UPDATED_POLL_FALLBACK"));
+});
+
+test("profit-engine reports live fallback status and source counts", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "profit-engine-live-fallback-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "value-1", clv: "0.040000", profit: "1.0000" }),
+  ], PAPER_COLUMNS);
+  await writeCsv(join(reportsDir, "ws-live-feed-stats.csv"), [
+    { observedAt: "2026-06-28T12:00:00Z", messageType: "welcome", seq: "", providerEventId: "", bookmaker: "", markets: "", auditRows: "0", trainingRows: "0", closedRows: "0", rejectionReasons: "" },
+    { observedAt: "2026-06-28T12:01:00Z", messageType: "updated_poll", seq: "", providerEventId: "live-1", bookmaker: "Stoiximan", markets: "MATCH_RESULT", auditRows: "0", trainingRows: "1", closedRows: "0", rejectionReasons: "" },
+  ], ["observedAt", "messageType", "seq", "providerEventId", "bookmaker", "markets", "auditRows", "trainingRows", "closedRows", "rejectionReasons"]);
+  await writeCsv(join(reportsDir, "live-training-observations.csv"), [
+    { source: "updated_poll", maxBet: "", market: "MATCH_RESULT" },
+  ], ["source", "maxBet", "market"]);
+
+  const { code } = await runOffline("profit-engine", reportsDir);
+
+  assert.equal(code, 0);
+  const json = JSON.parse(await readFile(join(reportsDir, "profit-engine-report.json"), "utf8"));
+  assert.equal(json.live.fallbackActive, true);
+  assert.equal(json.live.fallbackRecommended, false);
+  assert.equal(json.live.updatedPollRows, 1);
+  assert.equal(json.live.updatedPollTrainingRows, 1);
+  assert.equal(json.live.liveDataSource, "updated_poll");
+});

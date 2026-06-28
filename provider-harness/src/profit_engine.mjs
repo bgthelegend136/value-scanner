@@ -83,6 +83,8 @@ export function summarizeLiveEfficiency({
     MARKET_MESSAGE_TYPES.has(String(row.messageType ?? ""))).length;
   const updatedPollRows = liveFeedStatsRows.filter((row) =>
     String(row.messageType ?? "") === "updated_poll").length;
+  const updatedPollTrainingRows = liveTrainingRows.filter((row) =>
+    String(row.source ?? "") === "updated_poll").length;
   const candidateMessageRows = liveFeedStatsRows.filter((row) =>
     CANDIDATE_MESSAGE_TYPES.has(String(row.messageType ?? ""))).length;
   const trainingRowsFromFeed = sumNumeric(liveFeedStatsRows, "trainingRows");
@@ -91,6 +93,15 @@ export function summarizeLiveEfficiency({
   const trainingRows = Math.max(liveTrainingRows.length, trainingRowsFromFeed);
   const auditRows = Math.max(liveAuditRows.length, auditRowsFromFeed);
   const lifetimeCount = Math.max(lifetimeRows.length, closedRowsFromFeed);
+  const fallbackActive = updatedPollRows > 0 || updatedPollTrainingRows > 0;
+  const fallbackRecommended = liveFeedStatsRows.length > 0 && marketMessageRows === 0 && !fallbackActive;
+  const liveDataSource = marketMessageRows > 0 && fallbackActive
+    ? "mixed"
+    : fallbackActive
+      ? "updated_poll"
+      : marketMessageRows > 0
+        ? "websocket"
+        : "none";
 
   return {
     feedStatsRows: liveFeedStatsRows.length,
@@ -104,6 +115,10 @@ export function summarizeLiveEfficiency({
     statusMessageRows: liveFeedStatsRows.filter((row) => row.messageType === "status").length,
     welcomeRows: liveFeedStatsRows.filter((row) => row.messageType === "welcome").length,
     updatedPollRows,
+    updatedPollTrainingRows,
+    fallbackActive,
+    fallbackRecommended,
+    liveDataSource,
     liquidityRows: maxBetValues.length,
     averageMaxBet: average(maxBetValues),
     maxObservedBetLimit: maxBetValues.length ? Math.max(...maxBetValues) : null,
@@ -169,6 +184,7 @@ export function buildProfitEngineReport({
   if (live.feedStatsRows > 0 && live.marketMessageRows === 0) {
     warnings.push("LIVE_FEED_HAS_NO_MARKET_MESSAGES");
   }
+  if (live.fallbackRecommended) warnings.push("LIVE_UPDATED_POLL_FALLBACK_RECOMMENDED");
   if (live.statusRows > 0 && live.trainingRows === 0) warnings.push("LIVE_STATUS_WITHOUT_TRAINING");
   if (live.marketMessageRows > 0 && live.trainingRows === 0) warnings.push("LIVE_MARKETS_WITHOUT_TRAINING");
   if ((controlRow?.averageClv ?? 0) > 0) warnings.push("CONTROL_POSITIVE_DRIFT");

@@ -29,7 +29,7 @@ export function buildDailyDecisionReport({
   if (live.liquidityRows === 0) blockers.push("LIQUIDITY_NOT_MEASURED");
 
   const nextActions = ["RUN_PROFITABILITY_REPORT", "RUN_CALIBRATION_REPORT", "RUN_STAKING_SIM"];
-  if (live.feedStatsRows > 0 && live.marketMessageRows === 0) nextActions.push("RUN_LIVE_UPDATED_POLL_FALLBACK");
+  if (live.fallbackRecommended) nextActions.push("RUN_LIVE_UPDATED_POLL_FALLBACK");
   if (dataHealth.summary.ERROR > 0 || dataHealth.summary.WARN > 0) nextActions.push("RUN_DATA_HEALTH_REVIEW");
 
   const mode = blockers.length === 0 && profitability.gates.productionReady ? "PAPER_READY" : "RESEARCH_ONLY";
@@ -56,6 +56,10 @@ export function buildDailyDecisionReport({
     `Market messages: ${live.marketMessageRows}`,
     `Training rows: ${live.trainingRows}`,
     `Updated-poll rows: ${live.updatedPollRows ?? 0}`,
+    `Updated-poll training rows: ${live.updatedPollTrainingRows ?? 0}`,
+    `Live source: ${live.liveDataSource}`,
+    `Fallback active: ${live.fallbackActive}`,
+    `Fallback recommended: ${live.fallbackRecommended}`,
     ``,
     `## Blockers`,
     ...(blockers.length ? blockers.map((item) => `- ${item}`) : ["- none"]),

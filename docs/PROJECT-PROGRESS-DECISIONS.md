@@ -517,6 +517,40 @@ Interpretation:
   until the 200/200 sample gates are met and data-health issues are reviewed.
 - Kelly25 is a useful research simulator, not a staking approval.
 
+### 2026-06-28: Make live fallback diagnostics source-aware
+
+Decision:
+
+- Track whether live data comes from WebSocket market messages,
+  `/odds/updated`, both, or neither.
+- Add `fallbackActive`, `fallbackRecommended`, `updatedPollTrainingRows`, and
+  `liveDataSource` to live diagnostics.
+- Make `daily-decision-report` recommend `RUN_LIVE_UPDATED_POLL_FALLBACK` only
+  when fallback is not already active.
+
+Reason:
+
+- The previous report could say "run fallback" even when fallback rows already
+  existed.
+- Live WebSocket and `/odds/updated` have different reliability profiles and
+  should not be mixed silently.
+
+Latest real-data run:
+
+- WebSocket feed stats rows: 2.
+- WebSocket market messages: 0.
+- Updated-poll rows: 0.
+- Updated-poll training rows: 0.
+- Fallback active: false.
+- Fallback recommended: true.
+- Live data source: none.
+
+Interpretation:
+
+- Live WebSocket remains diagnostic-only.
+- The next live measurement action is `live-updated-poll`; real staking and live
+  alerts remain blocked.
+
 ## Next Gates
 
 Do not move beyond RESEARCH_ONLY until these gates are met:
