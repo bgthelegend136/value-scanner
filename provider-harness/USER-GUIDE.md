@@ -391,3 +391,26 @@ Enable-ScheduledTask -TaskName Bet-Mispricing-Scanner
 - `reports/logs/` — ημερήσια logs του scheduled task.
 
 Όλα τα παραπάνω είναι git-ignored και μένουν τοπικά.
+
+---
+
+## 12. Betsson one-API watchlist alerts (ενημέρωση 2026-06-29)
+
+Το Betsson branch είναι προσωρινό one-API πείραμα. Χρησιμοποιεί μόνο The Odds
+API: η Betsson είναι το candidate book και τα υπόλοιπα books του ίδιου event
+χρησιμοποιούνται ως consensus.
+
+Telegram από αυτό το branch στέλνεται μόνο όταν:
+
+- τρέχει το `theodds-betsson-poc` με `--telegram-watchlist`,
+- η αγορά είναι h2h / `MATCH_RESULT`,
+- το sport list περιλαμβάνει το event, μαζί με `soccer_fifa_world_cup`,
+- το finding έχει τουλάχιστον 5% EV, τουλάχιστον 4 consensus books, kickoff
+  1-72 ώρες μακριά, fresh quote, και όχι suspicious EV πάνω από 25%,
+- το ίδιο finding δεν έχει ήδη σταλεί.
+
+Δεν στέλνεται Telegram για `TOTALS`, `BTTS`, `DRAW_NO_BET` ή `DOUBLE_CHANCE`.
+Αυτά μένουν research-only μέχρι να αποκτήσουν δικό τους CLV/ROI sample.
+
+Το alert είναι watchlist/manual verification. Δεν είναι staking instruction και
+δεν έχει staking language μέχρι να περάσουν τα Betsson-specific gates.

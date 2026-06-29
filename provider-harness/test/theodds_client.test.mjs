@@ -246,6 +246,7 @@ test("calls event markets and historical event-id endpoints", async () => {
   const marketsUrl = new URL(urls[0]);
   assert.equal(marketsUrl.pathname, "/v4/sports/soccer_epl/events/evt-1/markets");
   assert.equal(marketsUrl.searchParams.get("regions"), "eu");
+  assert.equal(marketsUrl.searchParams.get("bookmakers"), null);
 
   const historicalEventsUrl = new URL(urls[1]);
   assert.equal(historicalEventsUrl.pathname, "/v4/historical/sports/soccer_epl/events");
@@ -258,4 +259,27 @@ test("calls event markets and historical event-id endpoints", async () => {
   assert.equal(historicalEventOddsUrl.pathname, "/v4/historical/sports/soccer_epl/events/evt-1/odds");
   assert.equal(historicalEventOddsUrl.searchParams.get("date"), "2025-08-16T12:00:00Z");
   assert.equal(historicalEventOddsUrl.searchParams.get("markets"), "h2h");
+});
+
+test("event markets can be scoped to explicit bookmakers", async () => {
+  const urls = [];
+  const client = createTheOddsApiClient({
+    apiKey: "secret",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonResponse([]);
+    },
+  });
+
+  await client.getEventMarkets({
+    sportKey: "soccer_fifa_world_cup",
+    eventId: "evt-1",
+    bookmakers: "betsson",
+  });
+
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/v4/sports/soccer_fifa_world_cup/events/evt-1/markets");
+  assert.equal(url.searchParams.get("bookmakers"), "betsson");
+  assert.equal(url.searchParams.get("regions"), null);
+  assert.equal(url.searchParams.get("dateFormat"), "iso");
 });

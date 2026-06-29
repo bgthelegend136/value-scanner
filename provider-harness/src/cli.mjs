@@ -20,6 +20,7 @@ import {
   applyClosingLine,
   findStalePending,
   mergePaperBets,
+  paperBetKey,
   paperSportKey,
   settlePaperBets,
   summarizeClv,
@@ -57,6 +58,19 @@ const TARGET_BOOKMAKERS = ["Novibet", "Stoiximan"];
 const REFERENCE_BOOKMAKER = "pinnacle";
 const PAPER_REFERENCE_MARKETS = "h2h,totals";
 const SOCCER_CORE_RESEARCH_MARKETS = "h2h,h2h_3_way,draw_no_bet,btts,double_chance";
+const BETSSON_ONEAPI_LEDGER = "betsson-oneapi-paper-bets.csv";
+const BETSSON_ONEAPI_REPORT_PREFIX = "betsson-oneapi-sweep";
+const BETSSON_ONEAPI_MARKETS = "h2h,h2h_3_way,totals,draw_no_bet,btts,double_chance";
+const BETSSON_ONEAPI_RESEARCH_ONLY_MARKETS = new Set(["TOTALS", "DRAW_NO_BET", "BTTS", "DOUBLE_CHANCE"]);
+const BETSSON_ONEAPI_COVERAGE_MARKETS = ["MATCH_RESULT", "TOTALS", "DRAW_NO_BET", "BTTS", "DOUBLE_CHANCE"];
+const BETSSON_SUMMER_SOCCER_SPORTS = [
+  "soccer_brazil_campeonato",
+  "soccer_brazil_serie_b",
+  "soccer_sweden_allsvenskan",
+  "soccer_norway_eliteserien",
+  "soccer_finland_veikkausliiga",
+  "soccer_league_of_ireland",
+];
 // Quota guard: stop a multi-league scan once The Odds API monthly credits drop
 // below this floor, so the autoscan can never drain the budget to zero. The
 // reserve leaves room for CLV capture (the irreplaceable spend).
@@ -202,6 +216,15 @@ async function defaultLoadMispricingConfig() {
   return {
     oddsApiKey: requireKey(env, "ODDS_API_IO_KEY"),
     theOddsApiKey: requireKey(env, "THE_ODDS_API_KEY"),
+    telegramToken: requireKey(env, "TELEGRAM_BOT_TOKEN"),
+    telegramChatId: requireKey(env, "TELEGRAM_CHAT_ID"),
+  };
+}
+
+async function defaultLoadTelegramConfig() {
+  const envPath = await resolveEnvPath(process.cwd());
+  const env = await loadEnvFile(envPath);
+  return {
     telegramToken: requireKey(env, "TELEGRAM_BOT_TOKEN"),
     telegramChatId: requireKey(env, "TELEGRAM_CHAT_ID"),
   };
@@ -498,6 +521,58 @@ function marketAvailabilityBooks(payload) {
     }
   }
   return byMarket;
+}
+
+const ALWAYS_REQUEST_EVENT_MARKETS = new Set(["h2h", "h2h_3_way", "totals"]);
+const API_MARKETS_BY_CANONICAL = new Map([
+  ["MATCH_RESULT", ["h2h", "h2h_3_way"]],
+  ["TOTALS", ["totals"]],
+  ["DRAW_NO_BET", ["draw_no_bet"]],
+  ["BTTS", ["btts"]],
+  ["DOUBLE_CHANCE", ["double_chance"]],
+]);
+
+function splitMarketKeys(value) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function preflightedEventMarkets(markets, availableByMarket) {
+  const requested = splitMarketKeys(markets);
+  if (availableByMarket.size === 0) return markets;
+  const filtered = requested.filter((market) =>
+    ALWAYS_REQUEST_EVENT_MARKETS.has(market) || availableByMarket.has(market),
+  );
+  return (filtered.length ? filtered : requested).join(",");
+}
+
+function preflightUnavailableCanonicalMarkets(expectedMarkets, availableByMarket) {
+  const unavailable = new Set();
+  if (availableByMarket.size === 0) return unavailable;
+  for (const market of expectedMarkets) {
+    const apiKeys = API_MARKETS_BY_CANONICAL.get(market) ?? [];
+    if (apiKeys.some((key) => ALWAYS_REQUEST_EVENT_MARKETS.has(key))) continue;
+    if (!apiKeys.some((key) => availableByMarket.has(key))) unavailable.add(market);
+  }
+  return unavailable;
+}
+
+function applyPreflightCoverageReasons(coverage, unavailableMarkets) {
+  if (unavailableMarkets.size === 0) return coverage;
+  return coverage.map((row) => unavailableMarkets.has(row.market)
+    ? {
+        ...row,
+        candidateRows: "0",
+        pricedCandidates: "0",
+        valueCandidates: "0",
+        controlCandidates: "0",
+        noValueCandidates: "0",
+        tooFewBooksCandidates: "0",
+        reason: "NO_CANDIDATE_BOOKMAKER",
+      }
+    : row);
 }
 
 async function runMarketAvailability({ args, loadTheOddsKey, createTheOddsClient, out, reportsDir, now }) {
@@ -894,6 +969,12 @@ function splitArg(args, name) {
     .filter(Boolean);
 }
 
+function withDefaultOption(args, name, value) {
+  return args.some((arg) => arg.startsWith(`--${name}=`))
+    ? args
+    : [...args, `--${name}=${value}`];
+}
+
 function sweepStatus(ev) {
   if (ev >= 0.15) return "SUSPICIOUS";
   if (ev >= 0.05) return "VALUE_CHECK";
@@ -935,6 +1016,78 @@ function sweepOpportunity(result) {
   };
 }
 
+function sweepResultKey(result) {
+  return [
+    result.eventId,
+    result.bookmaker,
+    result.market,
+    result.line ?? "",
+    result.outcome,
+  ].map((value) => String(value)).join("|");
+}
+
+function freshQuote(row, now, maxAgeMs = 15 * 60 * 1000) {
+  const updated = Date.parse(row.quoteUpdatedAt);
+  return Number.isFinite(updated) &&
+    updated <= now.getTime() + 60_000 &&
+    now.getTime() - updated <= maxAgeMs;
+}
+
+function h2hPickLabel(row) {
+  if (row.outcome === "1") return `${row.homeTeam} (1)`;
+  if (row.outcome === "2") return `${row.awayTeam} (2)`;
+  if (row.outcome === "X") return "Draw (X)";
+  return row.outcome;
+}
+
+function isCleanBetssonH2hWatchlist(row, now) {
+  const kickoffMs = Date.parse(row.kickoffUtc);
+  const hoursToKickoff = (kickoffMs - now.getTime()) / 3_600_000;
+  return row.bookmaker === "betsson" &&
+    row.market === "MATCH_RESULT" &&
+    row.ev >= 0.05 &&
+    row.ev <= 0.25 &&
+    row.consensusBooks >= 4 &&
+    hoursToKickoff >= 1 &&
+    hoursToKickoff <= 72 &&
+    freshQuote(row, now);
+}
+
+function formatBetssonWatchlist(row) {
+  const kickoff = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Athens",
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(row.kickoffUtc));
+  return [
+    "Betsson h2h research watchlist",
+    "",
+    `Event: ${row.homeTeam} vs ${row.awayTeam}`,
+    `Start: ${kickoff} Greece`,
+    `Pick: ${h2hPickLabel(row)}`,
+    `Offered: ${row.decimalOdds.toFixed(2)}`,
+    `Fair: ${row.fairOdds.toFixed(2)}`,
+    `EV: ${(row.ev * 100).toFixed(1)}%`,
+    `Consensus books: ${row.consensusBooks}`,
+    "",
+    "Research signal only. Verify the exact price and market manually.",
+  ].join("\n");
+}
+
+async function sendBetssonWatchlist({ rows, telegramClient, now, out }) {
+  let sent = 0;
+  for (const row of rows) {
+    if (!isCleanBetssonH2hWatchlist(row, now)) continue;
+    try {
+      await telegramClient.sendText(formatBetssonWatchlist(row));
+      sent += 1;
+    } catch {
+      out("Warning: Betsson h2h watchlist Telegram delivery failed.\n");
+    }
+  }
+  return sent;
+}
+
 function normalizeTheOddsPayload(payload, receivedAt) {
   return normalizeTheOddsResponse(Array.isArray(payload) ? payload : [payload], receivedAt);
 }
@@ -945,6 +1098,7 @@ function findTheOddsSweepRows(rows, {
   sampleMinEv,
   minBooks,
   candidateBookmakers,
+  researchOnlyMarkets = new Set(),
 }) {
   const byEvent = new Map();
   for (const row of rows) {
@@ -973,7 +1127,9 @@ function findTheOddsSweepRows(rows, {
         fairOdds: 1 / fair.fairProbability,
         ev,
         consensusBooks: fair.books,
-        status: ev >= threshold ? sweepStatus(ev) : "NO_VALUE",
+        status: ev >= threshold
+          ? researchOnlyMarkets.has(candidate.market) ? "RESEARCH_ONLY" : sweepStatus(ev)
+          : "NO_VALUE",
       };
       audit.push(result);
       if (ev >= threshold) values.push(result);
@@ -1032,6 +1188,7 @@ function summarizeSweepCoverage(rows, {
 
       let reason = "HAS_VALUE";
       if (marketRows.length === 0) reason = "NO_MARKET";
+      else if (candidates.length === 0) reason = "NO_CANDIDATE_BOOKMAKER";
       else if (pricedCandidates === 0) reason = "TOO_FEW_BOOKS";
       else if (valueCandidates === 0) reason = "NO_VALUE";
 
@@ -1060,6 +1217,12 @@ async function runTheOddsSweep({
   out,
   reportsDir,
   now,
+  ledgerFile = "paper-bets.csv",
+  reportPrefix = "theodds-sweep",
+  coveragePrefix = "theodds-sweep-coverage",
+  researchOnlyMarkets = new Set(),
+  coverageMarkets = SOCCER_CORE_COVERAGE_MARKETS,
+  telegramClient = null,
 }) {
   const client = createTheOddsClient({ apiKey: await loadTheOddsKey() });
   const threshold = numericArg(args, "edge", 2) / 100;
@@ -1068,6 +1231,7 @@ async function runTheOddsSweep({
   const sampleLimit = Math.max(0, Math.floor(numericArg(args, "sample-limit", 100)));
   const minBooks = Math.max(2, Math.floor(numericArg(args, "min-books", 4)));
   const maxSports = Math.max(1, Math.floor(numericArg(args, "max-sports", 12)));
+  const quotaFloor = Math.max(0, Math.floor(numericArg(args, "quota-floor", MIN_SCAN_QUOTA)));
   const marketProfile = optionValue(args, "market-profile", "");
   const soccerCore = marketProfile === "soccer-core";
   const markets = optionValue(args, "markets", soccerCore ? SOCCER_CORE_RESEARCH_MARKETS : PAPER_REFERENCE_MARKETS);
@@ -1099,9 +1263,23 @@ async function runTheOddsSweep({
       const eventIds = (eventsResponse.data ?? []).map((event) => String(event.id)).filter(Boolean).slice(0, eventLimit);
       for (const eventId of eventIds) {
         if (maxEventCredits > 0 && actualCredits >= maxEventCredits) break;
+        let eventMarkets = markets;
+        let preflightUnavailableMarkets = new Set();
+        if (candidateBookmakers.length > 0 && typeof client.getEventMarkets === "function") {
+          const marketResponse = await client.getEventMarkets({
+            sportKey,
+            eventId,
+            bookmakers: candidateBookmakers.join(","),
+          });
+          quotaRemaining = marketResponse.quota?.remaining ?? quotaRemaining;
+          actualCredits += Number(marketResponse.quota?.lastCost ?? 0) || 0;
+          const availableByMarket = marketAvailabilityBooks(marketResponse.data ?? []);
+          eventMarkets = preflightedEventMarkets(markets, availableByMarket);
+          preflightUnavailableMarkets = preflightUnavailableCanonicalMarkets(coverageMarkets, availableByMarket);
+        }
         let response;
         try {
-          response = await client.getEventOdds({ sportKey, eventId, regions, markets });
+          response = await client.getEventOdds({ sportKey, eventId, regions, markets: eventMarkets });
         } catch (error) {
           if (!String(error.message).includes("status 422")) throw error;
           skippedSports += 1;
@@ -1110,25 +1288,27 @@ async function runTheOddsSweep({
         quotaRemaining = response.quota?.remaining ?? quotaRemaining;
         actualCredits += Number(response.quota?.lastCost ?? 0) || 0;
         const rows = normalizeTheOddsPayload(response.data ?? [], response.receivedAt);
-        coverage.push(...summarizeSweepCoverage(rows, {
+        coverage.push(...applyPreflightCoverageReasons(summarizeSweepCoverage(rows, {
           sportKey,
           threshold,
           sampleMinEv,
           minBooks,
           candidateBookmakers,
-        }));
+          expectedMarkets: coverageMarkets,
+        }), preflightUnavailableMarkets));
         const result = findTheOddsSweepRows(rows, {
           sportKey,
           threshold,
           sampleMinEv,
           minBooks,
           candidateBookmakers,
+          researchOnlyMarkets,
         });
         values.push(...result.values);
         controls.push(...result.controls);
         audit.push(...result.audit);
       }
-      if (Number.isFinite(quotaRemaining) && quotaRemaining < MIN_SCAN_QUOTA) break;
+      if (Number.isFinite(quotaRemaining) && quotaRemaining < quotaFloor) break;
       if (maxEventCredits > 0 && actualCredits >= maxEventCredits) break;
       continue;
     }
@@ -1159,28 +1339,31 @@ async function runTheOddsSweep({
       sampleMinEv,
       minBooks,
       candidateBookmakers,
+      researchOnlyMarkets,
     });
     values.push(...result.values);
     controls.push(...result.controls);
     audit.push(...result.audit);
-    if (Number.isFinite(quotaRemaining) && quotaRemaining < MIN_SCAN_QUOTA) break;
+    if (Number.isFinite(quotaRemaining) && quotaRemaining < quotaFloor) break;
   }
 
   values.sort((a, b) => b.ev - a.ev);
   controls.sort((a, b) => b.ev - a.ev);
   const sampledControls = sampleLimit ? controls.slice(0, sampleLimit) : controls;
   const stamp = stampFrom(now);
-  await writeCsv(join(reportsDir, `theodds-sweep-${stamp}.csv`), audit.map(sweepRow), THEODDS_SWEEP_COLUMNS);
+  await writeCsv(join(reportsDir, `${reportPrefix}-${stamp}.csv`), audit.map(sweepRow), THEODDS_SWEEP_COLUMNS);
   if (soccerCore) {
     await writeCsv(
-      join(reportsDir, `theodds-sweep-coverage-${stamp}.csv`),
+      join(reportsDir, `${coveragePrefix}-${stamp}.csv`),
       coverage,
       THEODDS_SWEEP_COVERAGE_COLUMNS,
     );
   }
 
-  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  const ledgerPath = join(reportsDir, ledgerFile);
   const existing = await readCsvIfPresent(ledgerPath);
+  const existingKeys = new Set(existing.map((row) => paperBetKey(row)));
+  const newValueRows = values.filter((row) => !existingKeys.has(sweepResultKey(row)));
   const mergedValues = mergePaperBets(existing, values.map(sweepOpportunity), {
     firstSeenAt: now().toISOString(),
   });
@@ -1188,6 +1371,10 @@ async function runTheOddsSweep({
     firstSeenAt: now().toISOString(),
   });
   await writeCsv(ledgerPath, mergedControls.rows, PAPER_COLUMNS);
+  if (telegramClient) {
+    const sent = await sendBetssonWatchlist({ rows: newValueRows, telegramClient, now: now(), out });
+    if (sent > 0) out(`Sent ${sent} Betsson h2h watchlist message${sent === 1 ? "" : "s"}.\n`);
+  }
 
   out(
     `The Odds sweep — sports=${sportKeys.length}, skippedSports=${skippedSports}, auditRows=${audit.length}, value=${values.length}, controls=${sampledControls.length}, credits=${actualCredits}.\n`,
@@ -1196,6 +1383,77 @@ async function runTheOddsSweep({
   out(`Sampled ${mergedControls.added} sweep control${mergedControls.added === 1 ? "" : "s"}.\n`);
   out(`The Odds API quota remaining: ${quotaRemaining ?? "?"}\n`);
   return 0;
+}
+
+async function runTheOddsBetssonPoc({
+  args,
+  loadTheOddsKey,
+  loadTelegramConfig,
+  createTheOddsClient,
+  createTelegram,
+  out,
+  reportsDir,
+  now,
+}) {
+  const withoutBookmakerOverride = args.filter((arg) => !arg.startsWith("--bookmakers="));
+  const telegramWatchlist = withoutBookmakerOverride.includes("--telegram-watchlist");
+  const requestedMarkets = optionValue(withoutBookmakerOverride, "markets", BETSSON_ONEAPI_MARKETS);
+  const coverageMarkets = requestedMarkets === "h2h" ? ["MATCH_RESULT"] : BETSSON_ONEAPI_COVERAGE_MARKETS;
+  const pocArgs = [
+    ...withDefaultOption(
+      withDefaultOption(
+        withDefaultOption(
+          withDefaultOption(
+            withDefaultOption(
+              withDefaultOption(
+                withDefaultOption(
+                  withDefaultOption(withoutBookmakerOverride, "sports", BETSSON_SUMMER_SOCCER_SPORTS.join(",")),
+                  "market-profile",
+                  "soccer-core",
+                ),
+                "markets",
+                BETSSON_ONEAPI_MARKETS,
+              ),
+              "min-books",
+              "3",
+            ),
+            "max-event-credits",
+            "60",
+          ),
+          "quota-floor",
+          "150",
+        ),
+        "edge",
+        "1",
+      ),
+      "sample-limit",
+      "0",
+    ),
+    "--bookmakers=betsson",
+  ];
+  let telegramClient = null;
+  if (telegramWatchlist) {
+    const config = await loadTelegramConfig();
+    telegramClient = createTelegram({
+      token: config.telegramToken,
+      chatId: config.telegramChatId,
+    });
+  }
+  out(`Betsson one-API POC: using The Odds API only, candidate bookmaker=betsson, markets=${requestedMarkets}.\n`);
+  return await runTheOddsSweep({
+    args: pocArgs,
+    loadTheOddsKey,
+    createTheOddsClient,
+    out,
+    reportsDir,
+    now,
+    ledgerFile: BETSSON_ONEAPI_LEDGER,
+    reportPrefix: BETSSON_ONEAPI_REPORT_PREFIX,
+    coveragePrefix: "betsson-oneapi-coverage",
+    researchOnlyMarkets: BETSSON_ONEAPI_RESEARCH_ONLY_MARKETS,
+    coverageMarkets,
+    telegramClient,
+  });
 }
 
 function signed(value, digits = 4) {
@@ -1238,9 +1496,9 @@ function printPaperSummary(out, rows) {
 }
 
 async function runSettle({
-  loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+  loadTheOddsKey, createTheOddsClient, out, reportsDir, now, ledgerFile = "paper-bets.csv",
 }) {
-  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  const ledgerPath = join(reportsDir, ledgerFile);
   if (!await defaultFileExists(ledgerPath)) {
     out("No paper-bet ledger found. Run scan first.\n");
     return 0;
@@ -1361,8 +1619,9 @@ async function runClv({
   reportsDir,
   now,
   captureWindowMs = CLV_CAPTURE_WINDOW_MS,
+  ledgerFile = "paper-bets.csv",
 }) {
-  const ledgerPath = join(reportsDir, "paper-bets.csv");
+  const ledgerPath = join(reportsDir, ledgerFile);
   if (!await defaultFileExists(ledgerPath)) {
     out("No paper-bet ledger found. Run scan first.\n");
     return 0;
@@ -2350,6 +2609,7 @@ export async function runCli(argv, deps = {}) {
     reportsDir = DEFAULT_REPORTS_DIR,
     now = () => new Date(),
     loadMispricingConfig = defaultLoadMispricingConfig,
+    loadTelegramConfig = defaultLoadTelegramConfig,
     createValueBetsClient: createValueBets = createValueBetsClient,
     createTelegramClient: createTelegram = createTelegramClient,
     createState = createMispricingState,
@@ -2430,6 +2690,18 @@ export async function runCli(argv, deps = {}) {
         now,
       });
     }
+    if (command === "theodds-betsson-poc") {
+      return await runTheOddsBetssonPoc({
+        args: rest,
+        loadTheOddsKey,
+        loadTelegramConfig,
+        createTheOddsClient,
+        createTelegram,
+        out,
+        reportsDir,
+        now,
+      });
+    }
     if (command === "market-availability") {
       return await runMarketAvailability({
         args: rest,
@@ -2443,6 +2715,16 @@ export async function runCli(argv, deps = {}) {
     if (command === "settle") {
       return await runSettle({
         loadTheOddsKey, createTheOddsClient, out, reportsDir, now,
+      });
+    }
+    if (command === "betsson-oneapi-settle") {
+      return await runSettle({
+        loadTheOddsKey,
+        createTheOddsClient,
+        out,
+        reportsDir,
+        now,
+        ledgerFile: BETSSON_ONEAPI_LEDGER,
       });
     }
     if (command === "fd-settle") {
@@ -2462,6 +2744,21 @@ export async function runCli(argv, deps = {}) {
           windowArg?.slice("--window-minutes=".length),
           CLV_CAPTURE_WINDOW_MS,
         ),
+      });
+    }
+    if (command === "betsson-oneapi-clv") {
+      const windowArg = rest.find((a) => a.startsWith("--window-minutes="));
+      return await runClv({
+        loadTheOddsKey,
+        createTheOddsClient,
+        out,
+        reportsDir,
+        now,
+        captureWindowMs: parseWindowMs(
+          windowArg?.slice("--window-minutes=".length),
+          CLV_CAPTURE_WINDOW_MS,
+        ),
+        ledgerFile: BETSSON_ONEAPI_LEDGER,
       });
     }
     if (command === "clv-report") {
@@ -2584,7 +2881,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | data-health | profitability-report | calibration-report | staking-sim [--bankroll=N --policy=flat|flat_pct|kelly10|kelly25 --max-stake=N] | daily-decision-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | theodds-betsson-poc [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M --telegram-watchlist] | market-availability [--sports=K --markets=M --max-credits=N] | settle | betsson-oneapi-settle | fd-settle | clv [--window-minutes=N] | betsson-oneapi-clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | data-health | profitability-report | calibration-report | staking-sim [--bankroll=N --policy=flat|flat_pct|kelly10|kelly25 --max-stake=N] | daily-decision-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

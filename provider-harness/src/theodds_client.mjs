@@ -67,9 +67,13 @@ export function createTheOddsApiClient({
       sportKey,
       eventId,
       regions = "eu",
+      bookmakers,
       dateFormat = "iso",
     }) {
-      return request(`/sports/${sportKey}/events/${eventId}/markets`, { regions, dateFormat });
+      const parameters = { dateFormat };
+      if (bookmakers) parameters.bookmakers = bookmakers;
+      else parameters.regions = regions;
+      return request(`/sports/${sportKey}/events/${eventId}/markets`, parameters);
     },
     getHistoricalOdds({
       sportKey,

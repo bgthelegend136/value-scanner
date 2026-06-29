@@ -115,6 +115,39 @@ test("settles match-result home, draw, and away outcomes", () => {
   assert.deepEqual(settled.map((row) => row.profit), ["-1.0000", "2.5000", "-1.0000"]);
 });
 
+test("settles BTTS, draw-no-bet, and double-chance markets from final score", () => {
+  const rows = [
+    pending({ market: "BTTS", line: "", outcome: "YES" }),
+    pending({ market: "BTTS", line: "", outcome: "NO" }),
+    pending({ market: "DRAW_NO_BET", line: "", outcome: "1" }),
+    pending({ market: "DRAW_NO_BET", line: "", outcome: "2" }),
+    pending({ market: "DOUBLE_CHANCE", line: "", outcome: "1X" }),
+    pending({ market: "DOUBLE_CHANCE", line: "", outcome: "12" }),
+    pending({ market: "DOUBLE_CHANCE", line: "", outcome: "X2" }),
+  ];
+  const events = [{
+    id: "ref-1",
+    completed: true,
+    last_update: "2026-06-25T20:00:00Z",
+    scores: [
+      { name: "Spain", score: "1" },
+      { name: "Cape Verde", score: "1" },
+    ],
+  }];
+
+  const settled = settlePaperBets(rows, events);
+
+  assert.deepEqual(settled.map((row) => row.status), [
+    "WON",
+    "LOST",
+    "PUSH",
+    "PUSH",
+    "WON",
+    "LOST",
+    "WON",
+  ]);
+});
+
 test("settles totals wins, losses, pushes, and quarter lines", () => {
   const base = { market: "TOTALS", outcome: "OVER" };
   const rows = [
@@ -131,7 +164,7 @@ test("settles totals wins, losses, pushes, and quarter lines", () => {
 test("marks unknown markets and outcomes for review", () => {
   const rows = [
     pending({ outcome: "UNKNOWN" }),
-    pending({ market: "BTTS", outcome: "YES" }),
+    pending({ market: "BTTS", outcome: "MAYBE" }),
   ];
   assert.deepEqual(
     settlePaperBets(rows, drawScore).map((row) => row.status),

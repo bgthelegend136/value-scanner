@@ -132,10 +132,29 @@ function isoOrBlank(value) {
 }
 
 function resultStatus(row, homeScore, awayScore) {
+  const winner = homeScore > awayScore ? "1" : awayScore > homeScore ? "2" : "X";
   if (row.market === "MATCH_RESULT") {
     if (!["1", "X", "2"].includes(row.outcome)) return "REVIEW";
-    const winner = homeScore > awayScore ? "1" : awayScore > homeScore ? "2" : "X";
     return row.outcome === winner ? "WON" : "LOST";
+  }
+  if (row.market === "BTTS") {
+    if (!["YES", "NO"].includes(row.outcome)) return "REVIEW";
+    const bothScored = homeScore > 0 && awayScore > 0;
+    return (row.outcome === "YES") === bothScored ? "WON" : "LOST";
+  }
+  if (row.market === "DRAW_NO_BET") {
+    if (!["1", "2"].includes(row.outcome)) return "REVIEW";
+    if (winner === "X") return "PUSH";
+    return row.outcome === winner ? "WON" : "LOST";
+  }
+  if (row.market === "DOUBLE_CHANCE") {
+    const winners = {
+      "1X": new Set(["1", "X"]),
+      "12": new Set(["1", "2"]),
+      X2: new Set(["X", "2"]),
+    }[row.outcome];
+    if (!winners) return "REVIEW";
+    return winners.has(winner) ? "WON" : "LOST";
   }
   if (row.market !== "TOTALS") return "REVIEW";
 

@@ -214,6 +214,52 @@ stoiximan.gr / superbet.gr (regional identity remains `UNVERIFIED`). No
 scraping, no automation, no auto-betting; every alert carries a
 verify-before-betting risk block.
 
+### Betsson one-API POC
+
+```
+node src/cli.mjs theodds-betsson-poc --sports=soccer_fifa_world_cup --edge=1 --sample-min-ev=-2 --sample-limit=50
+```
+
+This branch contains a deliberately small proof of concept for a simpler
+architecture: use **The Odds API only**, treat `betsson` as the candidate
+bookmaker, and price it against the remaining The Odds API books on the same
+event id. Defaults are `--bookmakers=betsson`,
+`--markets=h2h,h2h_3_way,totals,draw_no_bet,btts,double_chance`,
+`--market-profile=soccer-core`, `--min-books=3`, `--edge=1`,
+`--max-event-credits=60`, `--quota-floor=150`, and `--sample-limit=0`.
+
+The Betsson POC writes to its own files:
+
+- `reports/betsson-oneapi-paper-bets.csv`
+- `reports/betsson-oneapi-sweep-*.csv`
+- `reports/betsson-oneapi-coverage-*.csv`
+
+`MATCH_RESULT` rows can be used for h2h research watchlist messages with
+`--telegram-watchlist`; `TOTALS`, `BTTS`, `DRAW_NO_BET`, and `DOUBLE_CHANCE`
+are recorded as `RESEARCH_ONLY` until they have their own CLV/ROI evidence.
+The `1%` edge threshold is for collection only; Telegram watchlist delivery
+keeps its stricter clean h2h gate: at least 5% EV, at least four consensus
+books, kickoff 1-72h away, a fresh quote, and no suspicious EV above 25%. It
+does not add staking language.
+The scheduled one-API runner includes `soccer_fifa_world_cup` and passes
+`--telegram-watchlist`, so clean Betsson h2h World Cup findings can be sent as
+manual-check watchlist alerts. Non-h2h markets never send Telegram in this POC.
+Use `node src/cli.mjs betsson-oneapi-clv --window-minutes=40` and
+`node src/cli.mjs betsson-oneapi-settle` for the dedicated ledger.
+
+Install the temporary July 1 scheduled experiment with:
+
+```text
+powershell -ExecutionPolicy Bypass -File scripts\install-betsson-oneapi-scan-task.ps1
+powershell -ExecutionPolicy Bypass -File scripts\install-betsson-oneapi-clv-task.ps1
+powershell -ExecutionPolicy Bypass -File scripts\install-betsson-oneapi-settle-task.ps1
+```
+
+The command is useful for testing whether a single-provider path can remove the
+Odds-API.io/The Odds API event-matching layer. It is not a production replacement
+yet: it only covers books available in The Odds API, and it still needs separate
+CLV/ROI evidence for Betsson before alerts or staking should rely on it.
+
 ### Paper ROI tracking
 
 Every `scan` automatically records each unique value alert in

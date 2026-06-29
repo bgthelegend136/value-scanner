@@ -84,6 +84,41 @@ test("settle updates completed bets and prints realized ROI", async () => {
   assert.doesNotMatch(await readFile(join(reportsDir, "paper-bets.csv"), "utf8"), new RegExp(KEY));
 });
 
+test("betsson-oneapi-settle updates the dedicated Betsson ledger only", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "betsson-oneapi-settle-"));
+  await writeCsv(join(reportsDir, "betsson-oneapi-paper-bets.csv"), [
+    paperRow({ bookmaker: "betsson", sportKey: "soccer_fifa_world_cup" }),
+  ], PAPER_COLUMNS);
+
+  const code = await runCli(["betsson-oneapi-settle"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getScores() {
+        return {
+          data: [{
+            id: "ref1",
+            completed: true,
+            scores: [
+              { name: "Spain", score: "1" },
+              { name: "Cape Verde", score: "1" },
+            ],
+            last_update: "2026-06-25T20:00:00Z",
+          }],
+          quota: { remaining: 496, lastCost: 1 },
+        };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-25T20:01:00Z"),
+  });
+
+  assert.equal(code, 0);
+  const rows = await readCsv(join(reportsDir, "betsson-oneapi-paper-bets.csv"));
+  assert.equal(rows[0].status, "WON");
+});
+
 test("settle fetches scores for every pending league", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "settle-multi-"));
   await writeCsv(join(reportsDir, "paper-bets.csv"), [

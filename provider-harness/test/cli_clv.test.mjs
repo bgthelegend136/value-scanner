@@ -94,6 +94,34 @@ test("clv captures closing line value for pending bets", async () => {
   assert.doesNotMatch(await readFile(join(reportsDir, "paper-bets.csv"), "utf8"), new RegExp(KEY));
 });
 
+test("betsson-oneapi-clv captures closing line value from the dedicated Betsson ledger", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "betsson-oneapi-clv-"));
+  await writeCsv(join(reportsDir, "betsson-oneapi-paper-bets.csv"), [
+    paperRow({ bookmaker: "betsson", sportKey: "soccer_fifa_world_cup" }),
+  ], PAPER_COLUMNS);
+  const calls = [];
+
+  const code = await runCli(["betsson-oneapi-clv", "--window-minutes=60"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getOdds(args) {
+        calls.push(args);
+        return { data: closingOdds, receivedAt: "2026-06-25T17:55:00Z", quota: { remaining: 100, lastCost: 1 } };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-25T17:30:00Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.equal(calls.length, 1);
+  const rows = await readCsv(join(reportsDir, "betsson-oneapi-paper-bets.csv"));
+  assert.notEqual(rows[0].clv, "");
+  await assert.rejects(() => readCsv(join(reportsDir, "paper-bets.csv")));
+});
+
 test("clv waits until kickoff is near before spending quota", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "clv-early-"));
   await writeCsv(join(reportsDir, "paper-bets.csv"), [paperRow()], PAPER_COLUMNS);
