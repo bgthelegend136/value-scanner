@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, readdir, writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -56,7 +56,14 @@ import { buildDailyDecisionReport } from "./daily_decision_report.mjs";
 import { hasPostKickoffClv, hasValidDecimalOdds, selectionKey as reportSelectionKey } from "./report_domain.mjs";
 import { pruneReportsDir } from "./reports_prune.mjs";
 import { isPaperScannableSport } from "./scan_scope.mjs";
-import { signed } from "./cli_shared.mjs";
+import {
+  defaultFileExists,
+  numericArg,
+  optionValue,
+  readCsvIfPresent,
+  signed,
+  splitArg,
+} from "./cli_shared.mjs";
 import { runBoost, runBoostCheck, runBoostCombo, runBoostMix } from "./commands/boost.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -143,11 +150,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPORTS_DIR = resolve(HERE, "..", "reports");
 const DEFAULT_SPORT_MAP = resolve(HERE, "..", "config", "multisport-map.json");
 
-const defaultFileExists = (path) => access(path).then(() => true, () => false);
-
-async function readCsvIfPresent(path) {
-  return await defaultFileExists(path) ? readCsv(path) : [];
-}
 
 async function defaultRunGit(startDir) {
   try {
@@ -892,22 +894,6 @@ async function runScan({
   return 0;
 }
 
-function optionValue(args, name, fallback = undefined) {
-  const hit = args.find((arg) => arg.startsWith(`--${name}=`));
-  return hit ? hit.slice(name.length + 3) : fallback;
-}
-
-function numericArg(args, name, fallback) {
-  const parsed = Number(optionValue(args, name, fallback));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function splitArg(args, name) {
-  return String(optionValue(args, name, ""))
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 function sweepStatus(ev) {
   if (ev >= 0.15) return "SUSPICIOUS";
