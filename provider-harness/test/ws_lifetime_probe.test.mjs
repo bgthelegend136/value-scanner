@@ -204,7 +204,7 @@ test("live feed stats path is enabled for shadow or training probes", () => {
 });
 
 test("target bookmaker option can widen measurement-only live training", () => {
-  assert.deepEqual([...targetBookmakersFromArgv([])], ["Stoiximan", "Novibet"]);
+  assert.deepEqual([...targetBookmakersFromArgv([])], ["Stoiximan", "Pamestoixima"]);
   assert.equal(targetBookmakersFromArgv(["--target-bookmakers=ALL"]), null);
   assert.deepEqual(
     [...targetBookmakersFromArgv(["--target-bookmakers=Bet365,Unibet"])],

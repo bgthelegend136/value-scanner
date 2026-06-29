@@ -391,3 +391,46 @@ Enable-ScheduledTask -TaskName Bet-Mispricing-Scanner
 - `reports/logs/` — ημερήσια logs του scheduled task.
 
 Όλα τα παραπάνω είναι git-ignored και μένουν τοπικά.
+
+---
+
+## 12. Τρέχοντα κριτήρια Telegram alert (ενημέρωση 2026-06-29)
+
+Το Telegram είναι **watchlist/manual-check alert**, όχι οδηγία πονταρίσματος.
+Αν έρθει μήνυμα, σημαίνει ότι το σύστημα βρήκε τιμή που πέρασε αυστηρό
+έλεγχο. Πριν γίνει οποιαδήποτε κίνηση, ανοίγεις χειροκίνητα το bookmaker και
+ελέγχεις αγώνα, αγορά, επιλογή, περιοχή και τρέχουσα απόδοση.
+
+Στο 2-API project στέλνεται Telegram μόνο όταν ισχύουν όλα:
+
+- Το Odds-API.io βρίσκει candidate σε `Stoiximan` ή `Pamestoixima`.
+- Η αγορά είναι μόνο `MATCH_RESULT` / h2h / 1X2.
+- Το αρχικό EV του candidate είναι τουλάχιστον 5%.
+- Ο αγώνας δεν έχει αρχίσει και η τιμή δεν είναι stale.
+- Η λίγκα ταιριάζει καθαρά με ενεργό sport key στο The Odds API. Το World Cup
+  είναι ενεργό mapping.
+- Βρίσκεται ίδιος αγώνας και ίδια επιλογή στο The Odds API.
+- Το EV απέναντι σε de-vigged Pinnacle είναι αυστηρά πάνω από 5%.
+- Το EV απέναντι στο median consensus τουλάχιστον 3 άλλων reference books είναι
+  αυστηρά πάνω από 5%.
+- Δεν έχει ήδη σταλεί το ίδιο candidate.
+- Το Telegram API απαντά επιτυχώς.
+
+Δεν στέλνεται Telegram για:
+
+- paper-only `scan` rows,
+- `CONTROL` rows,
+- `TOTALS`, `BTTS`, `DRAW_NO_BET`, `DOUBLE_CHANCE`,
+- stale odds,
+- unsupported markets,
+- rows που περνάνε το πρώτο provider EV αλλά αποτυγχάνουν σε Pinnacle ή
+  consensus confirmation.
+
+Στο Betsson one-API POC στέλνεται Telegram μόνο όταν το scheduled command
+τρέχει με `--telegram-watchlist`, η αγορά είναι καθαρό h2h/MATCH_RESULT, το
+World Cup συμπεριλαμβάνεται στα sports, και το finding περνά το clean Betsson
+watchlist gate. Τα υπόλοιπα markets μένουν research-only.
+
+Στις 2026-06-29 έγινε `telegram-test` και επέστρεψε `message 9`, το οποίο
+ελήφθη. Άρα το Telegram delivery δουλεύει. Αν δεν έρχονται alerts, η βασική
+ερμηνεία είναι ότι δεν βρέθηκαν νέα καθαρά confirmed +5% h2h opportunities.

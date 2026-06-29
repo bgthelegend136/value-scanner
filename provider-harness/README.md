@@ -4,7 +4,7 @@
 > διαβάζεις τα αποτελέσματα), δες το [`USER-GUIDE.md`](USER-GUIDE.md).
 
 A small, dependency-free Node.js 22 harness that helps determine whether
-Odds-API.io prices for **Superbet** and **Stoiximan** correspond to the prices
+Odds-API.io prices for **Pamestoixima** and **Stoiximan** correspond to the prices
 shown on their Greece-facing websites.
 
 It does this without scraping, automating, logging into, or betting on any
@@ -42,7 +42,7 @@ included in error messages or request URLs.
 ## Multi-sport bookmaker-mistake alerts
 
 `mispricing-scan` is a separate mode for detecting unusually large pre-match
-pricing mistakes at Stoiximan or Novibet across all sports returned by the
+pricing mistakes at Stoiximan or Pamestoixima across all sports returned by the
 candidate provider.
 
 ```powershell
@@ -67,8 +67,14 @@ The v1 contract is deliberately narrow:
 - no alert is sent if matching, freshness, Pinnacle, consensus, quota, or
   Telegram delivery checks fail.
 
+In practical terms, Telegram is a watchlist, not a staking instruction. A
+message means: "this price cleared the strict two-provider sanity checks; open
+the bookmaker manually and verify the exact market, selection, region, and
+current price before doing anything." No staking language is enabled while the
+profitability gates remain below target.
+
 The Telegram message contains the exact event, selection, offered odds,
-Pinnacle/consensus fair odds and EV, plus an allowlisted Stoiximan/Novibet
+Pinnacle/consensus fair odds and EV, plus an allowlisted Stoiximan/Pamestoixima
 button when the provider supplies a safe HTTPS link. The link may open the
 event rather than a pre-filled betslip; always verify the exact market and
 price manually.
@@ -77,9 +83,7 @@ This is not restricted to football or the World Cup. Candidates from any sport
 are considered, but no alert is possible when The Odds API has no matching
 active competition or when the league identity is ambiguous.
 
-Novibet candidate links currently observed from the provider may target
-`novibet.bet.br`, not the Greece-facing product. Such alerts are useful for
-detection only and require extra manual regional verification.
+Pamestoixima links are allowlisted only for HTTPS `pamestoixima.gr` domains.
 
 Runtime state is local and git-ignored:
 
@@ -106,6 +110,35 @@ Inspect or disable it with:
 Get-ScheduledTask -TaskName Bet-Mispricing-Scanner
 Disable-ScheduledTask -TaskName Bet-Mispricing-Scanner
 ```
+
+## Odds-API.io free-tier sampler
+
+Use the measurement-only sampler to spend otherwise idle Odds-API.io free-tier
+requests on raw `/value-bets` observations. It samples Stoiximan and
+Pamestoixima, appends to `reports/oddsio-value-sampler.csv`, sends no Telegram
+messages, and spends no The Odds API credits.
+
+```powershell
+node scripts\oddsio-value-sampler.mjs
+powershell -ExecutionPolicy Bypass -File scripts\install-oddsio-value-sampler-task.ps1
+Get-ScheduledTask -TaskName Bet-OddsIo-Sampler
+```
+
+The scheduled task runs every 2 minutes. With two selected bookmakers this uses
+about 60 Odds-API.io requests/hour, leaving headroom for the strict scanner,
+live polling, and manual checks.
+
+For live fallback measurement, install the `/odds/updated` poller:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-live-updated-poll-task.ps1
+Get-ScheduledTask -TaskName Bet-Live-Updated-Poll
+```
+
+It runs every 5 minutes, polls `Stoiximan,Pamestoixima` once per run, appends
+to `reports/ws-live-feed-stats.csv` and `reports/live-training-observations.csv`,
+and also sends no Telegram messages. Together, the sampler plus this poller use
+roughly 84 Odds-API.io requests/hour before strict scanner/manual headroom.
 
 ## Commands
 
@@ -176,7 +209,7 @@ node src/cli.mjs scan [--edge=2]
 Finds **positive-EV value bets** across **every in-season league mapped in
 `config/multisport-map.json`** (World Cup, Brazil Série A/B, EPL, Serie A,
 League of Ireland, Superettan, MLB, NPB, NFL, …) by comparing the bettable
-Greek-market books (**Stoiximan**, **Superbet** via Odds-API.io) against
+Greek-market books (**Stoiximan**, **Pamestoixima** via Odds-API.io) against
 **Pinnacle's de-vigged fair price** (via The Odds API). Only leagues whose
 reference sport is currently active are scanned. Default edge is **2%** (the
 realistic sharp edge; this paper-bet path sends nothing to Telegram, so it is

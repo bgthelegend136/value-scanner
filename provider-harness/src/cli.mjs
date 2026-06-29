@@ -50,10 +50,11 @@ import { buildProfitabilityReport, profitabilityCsvRow, PROFITABILITY_COLUMNS } 
 import { buildCalibrationReport, calibrationCsvRow, CALIBRATION_REPORT_COLUMNS } from "./calibration_report.mjs";
 import { buildStakingSimReport, stakingSimCsvRow, STAKING_SIM_COLUMNS } from "./staking_sim.mjs";
 import { buildDailyDecisionReport } from "./daily_decision_report.mjs";
+import { hasPostKickoffClv, hasValidDecimalOdds, selectionKey as reportSelectionKey } from "./report_domain.mjs";
 
 const execFileAsync = promisify(execFile);
 
-const TARGET_BOOKMAKERS = ["Novibet", "Stoiximan"];
+const TARGET_BOOKMAKERS = ["Pamestoixima", "Stoiximan"];
 const REFERENCE_BOOKMAKER = "pinnacle";
 const PAPER_REFERENCE_MARKETS = "h2h,totals";
 const SOCCER_CORE_RESEARCH_MARKETS = "h2h,h2h_3_way,draw_no_bet,btts,double_chance";
@@ -466,8 +467,12 @@ async function runLiveUpdatedPoll({ args, loadApiKey, createClient, out, reports
     await sleep(Math.min(intervalMs, Math.max(1, stopAt - Date.now())));
   } while (Date.now() < stopAt);
 
-  await writeCsv(join(reportsDir, "ws-live-feed-stats.csv"), feedRows, LIVE_FEED_STATS_COLUMNS);
-  await writeCsv(join(reportsDir, "live-training-observations.csv"), trainingRows, LIVE_TRAINING_COLUMNS);
+  const feedPath = join(reportsDir, "ws-live-feed-stats.csv");
+  const trainingPath = join(reportsDir, "live-training-observations.csv");
+  const existingFeedRows = await readCsvIfPresent(feedPath);
+  const existingTrainingRows = await readCsvIfPresent(trainingPath);
+  await writeCsv(feedPath, [...existingFeedRows, ...feedRows], LIVE_FEED_STATS_COLUMNS);
+  await writeCsv(trainingPath, [...existingTrainingRows, ...trainingRows], LIVE_TRAINING_COLUMNS);
   out(`Live updated poll: feedRows=${feedRows.length}, trainingRows=${trainingRows.length}, bookmakers=${targetBookmakers.join(",")}.\n`);
   return 0;
 }
@@ -697,7 +702,11 @@ function opportunityRow(result, fixture, consensus) {
   };
 }
 
-// Price one league's Stoiximan/Novibet odds against its Pinnacle reference.
+function paperReferenceMarketsForSport(sportKey) {
+  return String(sportKey ?? "").startsWith("tennis_") ? "h2h" : PAPER_REFERENCE_MARKETS;
+}
+
+// Price one league's Stoiximan/Pamestoixima odds against its Pinnacle reference.
 // Every returned opportunity/pair carries the league's sportKey so paper bets,
 // CLV capture, and settlement can later query the right reference sport.
 async function scanLeague({
@@ -722,7 +731,7 @@ async function scanLeague({
 
   const pairs = matchFixtures(referenceFixtures, bettableFixtures).map((pair) => ({ ...pair, sportKey }));
 
-  const referenceOdds = await theOddsClient.getOdds({ sportKey, markets: PAPER_REFERENCE_MARKETS });
+  const referenceOdds = await theOddsClient.getOdds({ sportKey, markets: paperReferenceMarketsForSport(sportKey) });
   const allReferenceSelections = normalizeTheOddsResponse(referenceOdds.data, referenceOdds.receivedAt);
   const referenceSelections = allReferenceSelections.filter((row) => row.bookmaker === REFERENCE_BOOKMAKER);
 
@@ -791,7 +800,6 @@ async function runScan({
   targetBookmakers = TARGET_BOOKMAKERS,
   sampleMinEv = null,
   sampleLimit = 0,
-  sampleRepeat = false,
 }) {
   const oddsClient = createClient({ apiKey: await loadApiKey() });
   const theOddsClient = createTheOddsClient({ apiKey: await loadTheOddsKey() });
@@ -858,11 +866,11 @@ async function runScan({
   const existingPaperBets = await readCsvIfPresent(ledgerPath);
   const merged = mergePaperBets(existingPaperBets, opportunities, {
     firstSeenAt: now().toISOString(),
-    includeFirstSeenAtInKey: sampleRepeat,
+    includeFirstSeenAtInKey: true,
   });
   const sampledMerged = mergePaperBets(merged.rows, sampledControls, {
     firstSeenAt: now().toISOString(),
-    includeFirstSeenAtInKey: sampleRepeat,
+    includeFirstSeenAtInKey: true,
   });
   await writeCsv(ledgerPath, sampledMerged.rows, PAPER_COLUMNS);
   out(`Recorded ${merged.added} new paper bet${merged.added === 1 ? "" : "s"}.\n`);
@@ -1392,7 +1400,7 @@ async function runClv({
   const closing = new Map();
   let quotaRemaining;
   for (const sportKey of pendingSportKeys) {
-    const response = await client.getOdds({ sportKey, markets: PAPER_REFERENCE_MARKETS });
+    const response = await client.getOdds({ sportKey, markets: paperReferenceMarketsForSport(sportKey) });
     quotaRemaining = response.quota?.remaining ?? quotaRemaining;
     for (const [key, probability] of closingFairByKey(response.data ?? [], response.receivedAt)) {
       closing.set(key, probability);
@@ -1775,6 +1783,59 @@ async function runDataHealth({ out, reportsDir, now }) {
     "utf8",
   );
   out(`Data health: ERROR=${report.summary.ERROR}, WARN=${report.summary.WARN}, INFO=${report.summary.INFO}\n`);
+  return 0;
+}
+
+const DATA_HEALTH_QUARANTINE_COLUMNS = [
+  "action", "reason", "selectionKey", ...PAPER_COLUMNS,
+];
+
+async function runDataHealthFix({ out, reportsDir }) {
+  const paperPath = join(reportsDir, "paper-bets.csv");
+  const paperRows = await readCsvIfPresent(paperPath);
+  const keptRows = [];
+  const quarantineRows = [];
+  let removedInvalidOdds = 0;
+  let clearedPostKickoffClv = 0;
+
+  for (const row of paperRows) {
+    if (!hasValidDecimalOdds(row)) {
+      removedInvalidOdds += 1;
+      quarantineRows.push({
+        action: "REMOVE_ROW",
+        reason: `invalid decimalOdds=${row.decimalOdds ?? ""}`,
+        selectionKey: reportSelectionKey(row),
+        ...row,
+      });
+      continue;
+    }
+
+    if (hasPostKickoffClv(row)) {
+      clearedPostKickoffClv += 1;
+      quarantineRows.push({
+        action: "CLEAR_POST_KICKOFF_CLV",
+        reason: "CLV captured after kickoff",
+        selectionKey: reportSelectionKey(row),
+        ...row,
+      });
+      keptRows.push({
+        ...row,
+        closingFairOdds: "",
+        clv: "",
+        clvCapturedAt: "",
+      });
+      continue;
+    }
+
+    keptRows.push(row);
+  }
+
+  if (quarantineRows.length > 0) {
+    await writeCsv(join(reportsDir, "data-health-quarantine.csv"), quarantineRows, DATA_HEALTH_QUARANTINE_COLUMNS);
+    await writeCsv(paperPath, keptRows, PAPER_COLUMNS);
+  }
+
+  out(`Data health fix: removedInvalidOdds=${removedInvalidOdds}, clearedPostKickoffClv=${clearedPostKickoffClv}\n`);
   return 0;
 }
 
@@ -2406,7 +2467,6 @@ export async function runCli(argv, deps = {}) {
       const sampleLimit = Number.isFinite(parsedSampleLimit) && parsedSampleLimit > 0
         ? Math.floor(parsedSampleLimit)
         : 0;
-      const sampleRepeat = rest.includes("--sample-repeat");
       const bookmakerArg = rest.find((a) => a.startsWith("--bookmakers="));
       const targetBookmakers = bookmakerArg
         ? parseBookmakers(bookmakerArg.slice("--bookmakers=".length))
@@ -2417,7 +2477,7 @@ export async function runCli(argv, deps = {}) {
       }
       return await runScan({
         loadApiKey, loadTheOddsKey, createClient, createTheOddsClient, out, reportsDir, now, threshold,
-        loadRegistry, registryPath: sportMapPath, targetBookmakers, sampleMinEv, sampleLimit, sampleRepeat,
+        loadRegistry, registryPath: sportMapPath, targetBookmakers, sampleMinEv, sampleLimit,
       });
     }
     if (command === "theodds-sweep") {
@@ -2478,6 +2538,9 @@ export async function runCli(argv, deps = {}) {
     }
     if (command === "data-health") {
       return await runDataHealth({ out, reportsDir, now });
+    }
+    if (command === "data-health-fix") {
+      return await runDataHealthFix({ out, reportsDir });
     }
     if (command === "profitability-report") {
       return await runProfitabilityReport({ out, reportsDir, now });
@@ -2584,7 +2647,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] [--sample-repeat] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | data-health | profitability-report | calibration-report | staking-sim [--bankroll=N --policy=flat|flat_pct|kelly10|kelly25 --max-stake=N] | daily-decision-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | data-health | data-health-fix | profitability-report | calibration-report | staking-sim [--bankroll=N --policy=flat|flat_pct|kelly10|kelly25 --max-stake=N] | daily-decision-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;

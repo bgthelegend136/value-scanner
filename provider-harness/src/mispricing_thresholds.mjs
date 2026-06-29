@@ -1,6 +1,6 @@
 // Single source of truth for the mispricing EV gates. These are meant to be
 // tuned: the goal is to collect 5%+ research signals while still separating
-// urgent 10%+ Stoiximan/Novibet mistakes from lower-confidence watchlist edges.
+// urgent 10%+ Stoiximan/Pamestoixima mistakes from lower-confidence watchlist edges.
 //
 // MIN_CANDIDATE_EV  — Odds-API.io's (approximate) EV a candidate must show to be
 //                     worth spending a reference credit to confirm.

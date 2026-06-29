@@ -48,20 +48,20 @@ test("normalizes a fresh ML candidate, fixes EV units, and drops totals in v1", 
   assert.equal(result.rejected[0].reason, "UNSUPPORTED_MARKET");
 });
 
-test("normalizes a Novibet candidate and keeps its allowlisted .bet.br link", () => {
-  const superbet = {
+test("normalizes a Pamestoixima candidate and keeps its allowlisted link", () => {
+  const pamestoixima = {
     ...fixture[0],
-    id: "sb-1",
-    bookmaker: "Novibet",
-    bookmakerOdds: { ...fixture[0].bookmakerOdds, href: "https://novibet.bet.br/event/1" },
+    id: "ps-1",
+    bookmaker: "Pamestoixima",
+    bookmakerOdds: { ...fixture[0].bookmakerOdds, href: "https://www.pamestoixima.gr/event/1" },
   };
-  const result = normalizeValueBets([superbet], {
+  const result = normalizeValueBets([pamestoixima], {
     receivedAt: "2026-06-25T08:56:00.000Z",
     now: new Date("2026-06-25T09:00:00.000Z"),
   });
   assert.equal(result.candidates.length, 1);
-  assert.equal(result.candidates[0].bookmaker, "Novibet");
-  assert.equal(result.candidates[0].link, "https://novibet.bet.br/event/1");
+  assert.equal(result.candidates[0].bookmaker, "Pamestoixima");
+  assert.equal(result.candidates[0].link, "https://www.pamestoixima.gr/event/1");
   assert.equal(result.candidates[0].linkDepth, "EVENT");
 });
 

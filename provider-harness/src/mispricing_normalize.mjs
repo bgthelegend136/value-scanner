@@ -1,15 +1,14 @@
-// Scope: Stoiximan + Novibet, MATCH_RESULT-only. The EV floor (see
+// Scope: Stoiximan + Pamestoixima, MATCH_RESULT-only. The EV floor (see
 // mispricing_thresholds.mjs) is tuned to collect 5%+ research/watchlist edges
 // while the Telegram formatter labels >=10% separately as urgent.
 // Odds-API.io reports `expectedValue` as an index ~ (offered/fair)*100,
 // NOT a percentage, so the fraction is (value - 100)/100.
-// TOTALS stays deferred (undocumented over/under direction). Novibet candidates
-// may resolve to novibet.bet.br (Brazil) -- verify before betting.
+// TOTALS stays deferred (undocumented over/under direction).
 import { MIN_CANDIDATE_EV } from "./mispricing_thresholds.mjs";
 
 const MAX_AGE_MS = 10 * 60 * 1000;
 
-const SUPPORTED_BOOKMAKERS = new Set(["Stoiximan", "Novibet"]);
+const SUPPORTED_BOOKMAKERS = new Set(["Stoiximan", "Pamestoixima"]);
 const ALLOWED_HOSTS = {
   Stoiximan: new Set([
     "stoiximan.gr",
@@ -17,10 +16,11 @@ const ALLOWED_HOSTS = {
     "en.stoiximan.gr",
     "m.stoiximan.gr",
   ]),
-  Novibet: new Set([
-    "novibet.gr",
-    "www.novibet.gr",
-    "novibet.bet.br",
+  Pamestoixima: new Set([
+    "pamestoixima.gr",
+    "www.pamestoixima.gr",
+    "en.pamestoixima.gr",
+    "m.pamestoixima.gr",
   ]),
 };
 

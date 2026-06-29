@@ -1,6 +1,6 @@
 // Measurement-only Odds-API.io WebSocket probe.
 //
-// It records how long Stoiximan/Novibet WebSocket prices remain strict confirmed
+// It records how long Stoiximan/Pamestoixima WebSocket prices remain strict confirmed
 // +EV under the same confirmation rule as Telegram alerts: Pinnacle fair
 // probability plus 3-book consensus EV must both clear the shared EV floor.
 // It sends no alerts.
@@ -23,7 +23,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPORTS_DIR = resolve(HERE, "..", "reports");
 const DEFAULT_SPORT_MAP = resolve(HERE, "..", "config", "multisport-map.json");
 const DEFAULT_WS_BASE_URL = "wss://api.odds-api.io/v3/ws";
-const TARGET_BOOKMAKERS = new Set(["Stoiximan", "Novibet"]);
+const TARGET_BOOKMAKERS = new Set(["Stoiximan", "Pamestoixima"]);
 const LEGACY_CSV_COLUMNS = [
   "openedAt", "closedAt", "lifetimeSeconds",
   "eventId", "bookmaker", "market", "line", "outcome",

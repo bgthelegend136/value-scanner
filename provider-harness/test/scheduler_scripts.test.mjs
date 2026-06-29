@@ -74,3 +74,30 @@ test("CLV runner invokes mispricing-clv and writes a transcript log", async () =
   assert.match(source, /mispricing-clv exited with code/);
   assert.doesNotMatch(source, /TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID/);
 });
+
+test("live updated poll installer runs every five minutes with only Odds-API.io key", async () => {
+  const source = await readFile(
+    new URL("../scripts/install-live-updated-poll-task.ps1", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /Bet-Live-Updated-Poll/);
+  assert.match(source, /run-live-updated-poll\.ps1/);
+  assert.match(source, /New-TimeSpan -Minutes 5/);
+  assert.match(source, /MultipleInstances IgnoreNew/);
+  assert.match(source, /ODDS_API_IO_KEY/);
+  assert.doesNotMatch(source, /THE_ODDS_API_KEY|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID/);
+});
+
+test("live updated poll runner invokes a single short fallback poll", async () => {
+  const source = await readFile(
+    new URL("../scripts/run-live-updated-poll.ps1", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /node src[\\/]cli\.mjs live-updated-poll/);
+  assert.match(source, /--bookmakers=Stoiximan,Pamestoixima/);
+  assert.match(source, /--duration-minutes=0/);
+  assert.match(source, /reports[\\/]logs/);
+  assert.match(source, /Start-Transcript/);
+});

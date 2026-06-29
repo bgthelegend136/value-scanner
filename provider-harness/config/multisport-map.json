@@ -16,5 +16,7 @@
   "football|italy-serie-a": "soccer_italy_serie_a",
   "football|norway-eliteserien": "soccer_norway_eliteserien",
   "football|sweden-allsvenskan": "soccer_sweden_allsvenskan",
-  "football|sweden-superettan": "soccer_sweden_superettan"
+  "football|sweden-superettan": "soccer_sweden_superettan",
+  "tennis|atp-wimbledon-london-great-britain": "tennis_atp_wimbledon",
+  "tennis|wta-wimbledon-london-great-britain": "tennis_wta_wimbledon"
 }

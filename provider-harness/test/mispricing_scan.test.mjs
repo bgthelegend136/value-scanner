@@ -93,7 +93,7 @@ function deps({ reportsDir, state, sent = [], quotaRemaining = 19998 }) {
   };
 }
 
-test("confirms, sends once per book, records delivery, and does not duplicate", async () => {
+test("confirms, sends once per selected Greek book, records delivery, and does not duplicate", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-confirm-"));
   const state = createMispricingState({ reportsDir });
   const sent = [];
@@ -104,7 +104,7 @@ test("confirms, sends once per book, records delivery, and does not duplicate", 
   assert.equal(first.confirmed, 2);
   assert.equal(first.sent, 2);
   assert.equal(second.sent, 0);
-  assert.deepEqual(sent.sort(), ["Stoiximan", "Novibet"].sort());
+  assert.deepEqual(sent.sort(), ["Pamestoixima", "Stoiximan"].sort());
   assert.equal((await state.readAlerts()).length, 2);
 
   const clv = await state.readClvLedger();

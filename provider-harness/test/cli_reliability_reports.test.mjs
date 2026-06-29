@@ -101,6 +101,40 @@ test("data-health reports duplicate selections, invalid numbers, stale pending, 
   assert.ok(json.summary.INFO >= 1);
 });
 
+test("data-health-fix quarantines invalid odds and clears post-kickoff CLV", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "data-health-fix-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "valid-value", clv: "0.040000" }),
+    paperRow({ referenceEventId: "bad-odds", decimalOdds: "1.0000", clv: "0.900000" }),
+    paperRow({
+      referenceEventId: "late-clv",
+      clv: "0.500000",
+      clvCapturedAt: "2026-06-28T18:01:00.000Z",
+    }),
+  ], PAPER_COLUMNS);
+
+  const { code, out } = await runOffline("data-health-fix", reportsDir);
+
+  assert.equal(code, 0);
+  assert.match(out, /Data health fix:/u);
+
+  const paperRows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(paperRows.length, 2);
+  assert.equal(paperRows.some((row) => row.referenceEventId === "bad-odds"), false);
+  const lateClv = paperRows.find((row) => row.referenceEventId === "late-clv");
+  assert.equal(lateClv.closingFairOdds, "");
+  assert.equal(lateClv.clv, "");
+  assert.equal(lateClv.clvCapturedAt, "");
+
+  const quarantineRows = await readCsv(join(reportsDir, "data-health-quarantine.csv"));
+  assert.equal(quarantineRows.length, 2);
+  assert.deepEqual(new Set(quarantineRows.map((row) => row.action)), new Set(["REMOVE_ROW", "CLEAR_POST_KICKOFF_CLV"]));
+
+  await runOffline("data-health", reportsDir);
+  const health = JSON.parse(await readFile(join(reportsDir, "data-health.json"), "utf8"));
+  assert.equal(health.summary.ERROR, 0);
+});
+
 test("profitability-report gates production on VALUE h2h sample and excludes totals from primary readiness", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "profitability-report-"));
   const rows = [
@@ -185,6 +219,26 @@ test("calibration-report writes EV bucket diagnostics, matched control compariso
   assert.equal(json.decision.modelStatus, "RANKING_SIGNAL");
   assert.ok(json.confidence.valueMatchResult.probabilityClvPositive > 0.5);
   assert.equal(json.monotonicity.status, "PASS");
+});
+
+test("calibration-report bootstrap confidence is not degenerate for mixed returns", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "calibration-report-confidence-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({ referenceEventId: "win-1", profit: "1.0000", clv: "0.040000" }),
+    paperRow({ referenceEventId: "win-2", outcome: "2", profit: "1.5000", clv: "0.020000" }),
+    paperRow({ referenceEventId: "loss-1", outcome: "X", status: "LOST", profit: "-1.0000", clv: "-0.010000" }),
+    paperRow({ referenceEventId: "loss-2", bookmaker: "Novibet", status: "LOST", profit: "-1.0000", clv: "0.005000" }),
+  ], PAPER_COLUMNS);
+
+  const { code } = await runOffline("calibration-report", reportsDir);
+
+  assert.equal(code, 0);
+  const json = JSON.parse(await readFile(join(reportsDir, "calibration-report.json"), "utf8"));
+  const confidence = json.confidence.valueMatchResult;
+  assert.ok(confidence.roiLower < confidence.roiUpper);
+  assert.ok(confidence.clvLower < confidence.clvUpper);
+  assert.ok(confidence.probabilityRoiPositive > 0);
+  assert.ok(confidence.probabilityRoiPositive < 1);
 });
 
 test("calibration-report excludes invalid odds and post-kickoff CLV rows", async () => {
@@ -335,6 +389,8 @@ test("daily-decision-report summarizes blockers and next action from offline rep
 
   const markdown = await readFile(join(reportsDir, "daily-decision-report.md"), "utf8");
   assert.match(markdown, /Mode: RESEARCH_ONLY/u);
+  assert.match(markdown, /VALUE gate settled: 1/u);
+  assert.match(markdown, /VALUE_CHECK h2h settled: 0/u);
   assert.match(markdown, /VALUE_MATCH_RESULT_SETTLED_BELOW_200/u);
   assert.match(markdown, /RUN_LIVE_UPDATED_POLL_FALLBACK/u);
 

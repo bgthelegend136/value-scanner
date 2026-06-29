@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { runCli } from "../src/cli.mjs";
 import { readCsv } from "../src/csv.mjs";
+import { writeCsv } from "../src/csv.mjs";
 
 const NOW = new Date("2026-06-28T12:00:00Z");
 
@@ -71,4 +72,97 @@ test("live-updated-poll calls updated odds with a fresh since timestamp and writ
   assert.equal(training.length, 3);
   assert.equal(training[0].sampleTier, "LIVE_UNCONFIRMED");
   assert.equal(training[0].confirmationStatus, "UNCONFIRMED");
+});
+
+test("live-updated-poll appends to existing feed and training history", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "live-updated-poll-append-"));
+  await writeCsv(join(reportsDir, "ws-live-feed-stats.csv"), [{
+    observedAt: "2026-06-28T11:55:00Z",
+    messageType: "updated_poll",
+    seq: "",
+    providerEventId: "old",
+    bookmaker: "Stoiximan",
+    markets: "MATCH_RESULT",
+    auditRows: "0",
+    trainingRows: "1",
+    closedRows: "0",
+    rejectionReasons: "",
+  }], ["observedAt", "messageType", "seq", "providerEventId", "bookmaker", "markets", "auditRows", "trainingRows", "closedRows", "rejectionReasons"]);
+  await writeCsv(join(reportsDir, "live-training-observations.csv"), [{
+    observedAt: "2026-06-28T11:55:00Z",
+    seq: "",
+    providerEventId: "old",
+    referenceEventId: "",
+    sportKey: "",
+    liveStatus: "",
+    homeScore: "",
+    awayScore: "",
+    bookmaker: "Stoiximan",
+    match: "Old - Row",
+    market: "MATCH_RESULT",
+    line: "",
+    outcome: "1",
+    offeredOdds: "2.0000",
+    maxBet: "",
+    pinnacleFairProbability: "",
+    pinnacleFairOdds: "",
+    pinnacleEv: "",
+    consensusFairProbability: "",
+    consensusFairOdds: "",
+    consensusEv: "",
+    consensusBooks: "",
+    minimumConfirmedEv: "",
+    edgeOverDispersion: "",
+    sampleTier: "LIVE_UNCONFIRMED",
+    confirmationStatus: "UNCONFIRMED",
+    rejectionReason: "",
+    source: "updated_poll",
+  }], [
+    "observedAt", "seq", "providerEventId", "referenceEventId", "sportKey", "liveStatus", "homeScore", "awayScore",
+    "bookmaker", "match", "market", "line", "outcome", "offeredOdds", "maxBet",
+    "pinnacleFairProbability", "pinnacleFairOdds", "pinnacleEv",
+    "consensusFairProbability", "consensusFairOdds", "consensusEv", "consensusBooks",
+    "minimumConfirmedEv", "edgeOverDispersion", "sampleTier", "confirmationStatus", "rejectionReason", "source",
+  ]);
+
+  const code = await runCli([
+    "live-updated-poll",
+    "--sport=Football",
+    "--bookmakers=Stoiximan",
+    "--duration-minutes=0",
+  ], {
+    out: () => {},
+    err: () => {},
+    reportsDir,
+    now: () => NOW,
+    loadApiKey: async () => "odds-api-io-secret",
+    loadTheOddsKey: async () => { throw new Error("live-updated-poll must not load The Odds API key"); },
+    createClient: () => ({
+      async getOddsUpdated() {
+        return {
+          data: [{
+            id: 101,
+            date: "2026-06-28T18:00:00Z",
+            home: "Japan",
+            away: "Sweden",
+            league: { name: "World Cup" },
+            sport: { name: "Football" },
+            status: "live",
+            bookmakers: {
+              Stoiximan: [{
+                name: "ML",
+                updatedAt: NOW.toISOString(),
+                odds: [{ home: "2.00", draw: "3.40", away: "3.80" }],
+              }],
+            },
+          }],
+          receivedAt: NOW.toISOString(),
+        };
+      },
+    }),
+  });
+
+  assert.equal(code, 0);
+  assert.equal((await readCsv(join(reportsDir, "ws-live-feed-stats.csv"))).length, 2);
+  assert.equal((await readCsv(join(reportsDir, "live-training-observations.csv"))).length, 4);
 });

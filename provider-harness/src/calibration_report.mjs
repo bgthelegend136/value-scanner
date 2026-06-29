@@ -27,13 +27,19 @@ function quantile(values, q) {
   return sorted[index];
 }
 
-function deterministicResamples(values, iterations = 200) {
+function nextRandom(seed) {
+  return (seed * 1664525 + 1013904223) >>> 0;
+}
+
+function deterministicResamples(values, iterations = 1000) {
   if (values.length === 0) return [];
   const out = [];
+  let seed = 0x9e3779b9 ^ values.length;
   for (let i = 0; i < iterations; i += 1) {
     let total = 0;
     for (let j = 0; j < values.length; j += 1) {
-      total += values[(i * 17 + j * 31) % values.length];
+      seed = nextRandom(seed);
+      total += values[(seed >>> 8) % values.length];
     }
     out.push(total / values.length);
   }

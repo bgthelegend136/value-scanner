@@ -38,7 +38,7 @@ const oddsApiOdds = {
   id: 999, home: "Spain", away: "Cape Verde", date: "2026-06-25T18:00:00Z", league: { name: "World Cup" },
   bookmakers: {
     Stoiximan: [{ name: "ML", updatedAt: "2026-06-24T12:00:00Z", odds: [{ home: "1.28", draw: "7.50", away: "10.5" }] }],
-    Novibet: [{ name: "ML", updatedAt: "2026-06-24T12:00:00Z", odds: [{ home: "1.29", draw: "6.10", away: "10.0" }] }],
+    Pamestoixima: [{ name: "ML", updatedAt: "2026-06-24T12:00:00Z", odds: [{ home: "1.29", draw: "6.10", away: "10.0" }] }],
   },
 };
 
@@ -76,7 +76,7 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
   assert.match(out, /Match: Spain - Cape Verde/);
   assert.match(out, /Stoiximan/);
   assert.deepEqual(calls.find((c) => c[0] === "oddsapi.events")[1], { sport: "football", league: "international-fifa-world-cup", status: "pending", limit: 100 });
-  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.multi")[1], { eventIds: ["999"], bookmakers: ["Novibet", "Stoiximan"] });
+  assert.deepEqual(calls.find((c) => c[0] === "oddsapi.multi")[1], { eventIds: ["999"], bookmakers: ["Pamestoixima", "Stoiximan"] });
   assert.equal(calls.filter((c) => c[0] === "oddsapi.multi").length, 1);
   assert.equal(calls.filter((c) => c[0] === "theodds.odds").length, 1);
 
@@ -94,8 +94,8 @@ test("scan finds value vs Pinnacle, prints alerts, writes report, leaks no key",
     valueRaw,
     /^\+\d+\.\d+%,(VALUE|VALUE_CHECK|SUSPICIOUS),Spain v Cape Verde,Draw \(X\),Stoiximan,7\.50,\d+\.\d+,\d+\.\d+,2,/m,
   );
-  // the clean report must NOT contain the NO_VALUE Novibet draw row
-  assert.doesNotMatch(valueRaw, /Novibet/);
+  // the clean report must NOT contain the NO_VALUE Pamestoixima draw row
+  assert.doesNotMatch(valueRaw, /Pamestoixima/);
 
   const fullRaw = await readFile(join(reportsDir, fullReport), "utf8");
   assert.match(fullRaw, /NO_VALUE/);
@@ -170,6 +170,103 @@ test("scan covers every in-season mapped league and tags paper bets with sportKe
   assert.match(ledger, /^br1,222,.*soccer_brazil_serie_b$/m);
 });
 
+test("scan includes active tennis moneyline mappings without changing soccer primary market", async () => {
+  const calls = [];
+  const reportsDir = await mkdtemp(join(tmpdir(), "scan-tennis-"));
+  const tennisRefEvent = {
+    id: "tennis-ref-1",
+    home_team: "Carlos Alcaraz",
+    away_team: "Jannik Sinner",
+    commence_time: "2026-06-30T14:00:00Z",
+  };
+  const tennisBetEvent = {
+    id: 7001,
+    home: "Carlos Alcaraz",
+    away: "Jannik Sinner",
+    date: "2026-06-30T14:00:00Z",
+    league: { name: "ATP - Wimbledon, London, Great Britain" },
+  };
+  const code = await runCli(["scan"], {
+    out: () => {},
+    err: () => {},
+    loadApiKey: async () => ODDS_KEY,
+    loadTheOddsKey: async () => THEODDS_KEY,
+    createClient: () => ({
+      async listEvents(args) {
+        calls.push(["oddsapi.events", args]);
+        if (args.sport !== "tennis") return { data: [], receivedAt: "2026-06-29T08:00:00.000Z", rateLimit: { remaining: 99 } };
+        assert.equal(args.league, "atp-wimbledon-london-great-britain");
+        return { data: [tennisBetEvent], receivedAt: "2026-06-29T08:00:00.000Z", rateLimit: { remaining: 98 } };
+      },
+      async getOddsMulti(args) {
+        calls.push(["oddsapi.multi", args]);
+        return {
+          data: [{
+            ...tennisBetEvent,
+            bookmakers: {
+              Stoiximan: [{
+                name: "ML",
+                updatedAt: "2026-06-29T08:00:00Z",
+                odds: [{ home: "2.20", away: "1.70" }],
+              }],
+            },
+          }],
+          receivedAt: "2026-06-29T08:00:00.000Z",
+        };
+      },
+    }),
+    createTheOddsClient: () => ({
+      async listSports() {
+        calls.push(["theodds.sports"]);
+        return { data: [{ key: "tennis_atp_wimbledon", group: "Tennis", title: "ATP Wimbledon", active: true }] };
+      },
+      async listEvents(args) {
+        calls.push(["theodds.events", args]);
+        return { data: [tennisRefEvent], receivedAt: "2026-06-29T08:00:00.000Z", quota: { remaining: 5000 } };
+      },
+      async getOdds(args) {
+        calls.push(["theodds.odds", args]);
+        return {
+          data: [{
+            ...tennisRefEvent,
+            sport_title: "ATP Wimbledon",
+            bookmakers: [{
+              key: "pinnacle",
+              title: "Pinnacle",
+              last_update: "2026-06-29T08:00:00Z",
+              markets: [{
+                key: "h2h",
+                last_update: "2026-06-29T08:00:00Z",
+                outcomes: [
+                  { name: "Carlos Alcaraz", price: 2.05 },
+                  { name: "Jannik Sinner", price: 1.82 },
+                ],
+              }],
+            }],
+          }],
+          receivedAt: "2026-06-29T08:00:00.000Z",
+          quota: { remaining: 4998 },
+        };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-29T08:00:00.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.ok(calls.some((call) =>
+    call[0] === "oddsapi.events" &&
+    call[1].sport === "tennis" &&
+    call[1].league === "atp-wimbledon-london-great-britain",
+  ));
+  assert.equal(calls.find((call) => call[0] === "theodds.odds")[1].markets, "h2h");
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].sportKey, "tennis_atp_wimbledon");
+  assert.equal(rows[0].market, "MATCH_RESULT");
+  assert.equal(rows[0].outcome, "1");
+});
+
 test("scan stops early when The Odds API quota falls below the 1000-credit CLV reserve", async () => {
   let oddsCalls = 0;
   const theOdds = {
@@ -192,11 +289,11 @@ test("scan stops early when The Odds API quota falls below the 1000-credit CLV r
   assert.equal(oddsCalls, 1); // stopped after the first league, never queried the second
 });
 
-test("repeated scans do not duplicate the same paper bet", async () => {
+test("repeated scans record the same paper selection as separate snapshots", async () => {
   const calls = [];
   let out = "";
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-dedup-"));
-  const deps = {
+  const deps = (iso) => ({
     out: (text) => { out += text; },
     err: () => {},
     loadApiKey: async () => ODDS_KEY,
@@ -204,15 +301,17 @@ test("repeated scans do not duplicate the same paper bet", async () => {
     createClient: () => fakeOddsApiClient(calls),
     createTheOddsClient: () => fakeTheOddsClient(calls),
     reportsDir,
-    now: () => new Date("2026-06-24T12:00:05.000Z"),
-  };
+    now: () => new Date(iso),
+  });
 
-  assert.equal(await runCli(["scan"], deps), 0);
-  assert.equal(await runCli(["scan"], deps), 0);
+  assert.equal(await runCli(["scan"], deps("2026-06-24T12:00:05.000Z")), 0);
+  assert.equal(await runCli(["scan"], deps("2026-06-24T13:00:05.000Z")), 0);
 
   const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
-  assert.equal(rows.length, 1);
-  assert.match(out, /Skipped 1 duplicate paper bet/);
+  assert.equal(rows.length, 2);
+  assert.equal(new Set(rows.map((row) => row.firstSeenAt)).size, 2);
+  assert.match(out, /Recorded 1 new paper bet/);
+  assert.doesNotMatch(out, /Skipped 1 duplicate paper bet/);
 });
 
 test("scan accepts a paper-only bookmaker override", async () => {
@@ -333,7 +432,7 @@ test("scan can add a capped control sample below the value threshold", async () 
   assert.ok(rows.every((row) => row.status === "PENDING"));
 });
 
-test("scan sample-repeat records the same selection in later snapshots", async () => {
+test("scan records sampled controls in later snapshots", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "scan-repeat-sample-"));
   const deps = (iso) => ({
     out: () => {},
@@ -346,7 +445,7 @@ test("scan sample-repeat records the same selection in later snapshots", async (
     now: () => new Date(iso),
   });
 
-  const args = ["scan", "--edge=0", "--sample-min-ev=-5", "--sample-limit=2", "--sample-repeat"];
+  const args = ["scan", "--edge=0", "--sample-min-ev=-5", "--sample-limit=2"];
   assert.equal(await runCli(args, deps("2026-06-24T12:00:05.000Z")), 0);
   assert.equal(await runCli(args, deps("2026-06-24T13:00:05.000Z")), 0);
 

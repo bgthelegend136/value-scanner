@@ -290,6 +290,65 @@ test("clv queries each pending league's closing line and merges them", async () 
   for (const row of rows) assert.notEqual(row.clv, "");
 });
 
+test("clv captures tennis moneyline with h2h-only reference market", async () => {
+  const reportsDir = await mkdtemp(join(tmpdir(), "clv-tennis-"));
+  await writeCsv(join(reportsDir, "paper-bets.csv"), [
+    paperRow({
+      referenceEventId: "tennis-ref-1",
+      bettableEventId: "7001",
+      sportKey: "tennis_atp_wimbledon",
+      homeTeam: "Carlos Alcaraz",
+      awayTeam: "Jannik Sinner",
+      kickoffUtc: "2026-06-29T08:05:00.000Z",
+      outcome: "1",
+      decimalOdds: "2.2000",
+      fairOdds: "2.0500",
+      fairProbability: "0.487805",
+      ev: "0.073171",
+    }),
+  ], PAPER_COLUMNS);
+  const calls = [];
+  const code = await runCli(["clv"], {
+    out: () => {},
+    err: () => {},
+    loadTheOddsKey: async () => KEY,
+    createTheOddsClient: () => ({
+      async getOdds(args) {
+        calls.push(args);
+        return {
+          data: [{
+            id: "tennis-ref-1",
+            sport_title: "ATP Wimbledon",
+            commence_time: "2026-06-29T08:05:00Z",
+            home_team: "Carlos Alcaraz",
+            away_team: "Jannik Sinner",
+            bookmakers: [{
+              key: "pinnacle",
+              markets: [{
+                key: "h2h",
+                outcomes: [
+                  { name: "Carlos Alcaraz", price: 2.00 },
+                  { name: "Jannik Sinner", price: 1.90 },
+                ],
+              }],
+            }],
+          }],
+          receivedAt: "2026-06-29T08:00:00.000Z",
+          quota: { remaining: 4998 },
+        };
+      },
+    }),
+    reportsDir,
+    now: () => new Date("2026-06-29T08:00:00.000Z"),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(calls, [{ sportKey: "tennis_atp_wimbledon", markets: "h2h" }]);
+  const rows = await readCsv(join(reportsDir, "paper-bets.csv"));
+  assert.equal(rows[0].clvCapturedAt, "2026-06-29T08:00:00.000Z");
+  assert.ok(Number(rows[0].clv) > 0);
+});
+
 test("clv spends no quota with no ledger or no pending bets", async () => {
   const reportsDir = await mkdtemp(join(tmpdir(), "clv-empty-"));
   let calls = 0;

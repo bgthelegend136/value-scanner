@@ -35,6 +35,12 @@ export function buildDailyDecisionReport({
   const mode = blockers.length === 0 && profitability.gates.productionReady ? "PAPER_READY" : "RESEARCH_ONLY";
   const primaryValue = profitability.rows.find((row) =>
     row.scope === "primary" && row.key === "MATCH_RESULT|VALUE" && row.grain === "row");
+  const primaryValueCheck = profitability.rows.find((row) =>
+    row.scope === "primary" && row.key === "MATCH_RESULT|VALUE_CHECK" && row.grain === "row");
+  const overallValue = profitability.rows.find((row) =>
+    row.scope === "overall" && row.key === "all|VALUE" && row.grain === "row");
+  const overallValueCheck = profitability.rows.find((row) =>
+    row.scope === "overall" && row.key === "all|VALUE_CHECK" && row.grain === "row");
   const primaryControl = profitability.rows.find((row) =>
     row.scope === "primary" && row.key === "MATCH_RESULT|CONTROL" && row.grain === "row");
 
@@ -45,11 +51,15 @@ export function buildDailyDecisionReport({
     `Mode: ${mode}`,
     ``,
     `## Primary h2h`,
-    `VALUE settled: ${primaryValue?.settled ?? 0}`,
+    `VALUE gate settled: ${primaryValue?.settled ?? 0}`,
     `VALUE ROI: ${pct(primaryValue?.roi)}`,
     `VALUE avg CLV: ${pct(primaryValue?.avgClv)}`,
+    `VALUE_CHECK h2h settled: ${primaryValueCheck?.settled ?? 0}`,
+    `VALUE_CHECK h2h ROI: ${pct(primaryValueCheck?.roi)}`,
     `CONTROL settled: ${primaryControl?.settled ?? 0}`,
     `CONTROL ROI: ${pct(primaryControl?.roi)}`,
+    `All-market VALUE settled: ${overallValue?.settled ?? 0}`,
+    `All-market VALUE_CHECK settled: ${overallValueCheck?.settled ?? 0}`,
     ``,
     `## Live`,
     `Feed rows: ${live.feedStatsRows}`,
