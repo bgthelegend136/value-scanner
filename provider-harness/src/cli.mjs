@@ -51,6 +51,7 @@ import { buildCalibrationReport, calibrationCsvRow, CALIBRATION_REPORT_COLUMNS }
 import { buildStakingSimReport, stakingSimCsvRow, STAKING_SIM_COLUMNS } from "./staking_sim.mjs";
 import { buildDailyDecisionReport } from "./daily_decision_report.mjs";
 import { hasPostKickoffClv, hasValidDecimalOdds, selectionKey as reportSelectionKey } from "./report_domain.mjs";
+import { pruneReportsDir } from "./reports_prune.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -2542,6 +2543,17 @@ export async function runCli(argv, deps = {}) {
     if (command === "data-health-fix") {
       return await runDataHealthFix({ out, reportsDir });
     }
+    if (command === "reports-prune") {
+      const keepArg = rest.find((a) => a.startsWith("--keep="));
+      const keep = keepArg ? Number(keepArg.slice("--keep=".length)) : 8;
+      if (!Number.isInteger(keep) || keep < 0) {
+        err("usage: reports-prune [--keep=N] (N must be a non-negative integer)\n");
+        return 1;
+      }
+      const { deleted, bytesFreed } = await pruneReportsDir(reportsDir, { keep });
+      out(`Pruned ${deleted.length} old report snapshot(s), freed ${(bytesFreed / 1024).toFixed(0)} KB.\n`);
+      return 0;
+    }
     if (command === "profitability-report") {
       return await runProfitabilityReport({ out, reportsDir, now });
     }
@@ -2647,7 +2659,7 @@ export async function runCli(argv, deps = {}) {
     }
 
     err(
-      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | data-health | data-health-fix | profitability-report | calibration-report | staking-sim [--bankroll=N --policy=flat|flat_pct|kelly10|kelly25 --max-stake=N] | daily-decision-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
+      "usage: node src/cli.mjs <events | capture <eventId> | live-preflight [--sport=S --bookmakers=A,B --markets=M --max-events=N] | live-updated-poll [--sport=S --bookmakers=A,B --interval-seconds=N --duration-minutes=N] | scan [--edge=N] [--bookmakers=A,B] [--sample-min-ev=N --sample-limit=M] | theodds-sweep [--sports=K] [--edge=N --sample-min-ev=N --sample-limit=M] | market-availability [--sports=K --markets=M --max-credits=N] | settle | fd-settle | clv [--window-minutes=N] | boost --base=N --boost=N [--market=T [--legs=N] | --margin=P] | boost-check --sport-key=K --home=H --away=A --date=ISO --pick=1|X|2 --boost=N [--base=N] | boost-combo --boost=N --leg=\"K;H;A;ISO;1|X|2\" --leg=... | boost-mix --boost=N --leg=\"K;H;A;ISO;PICK\" --leg=... | evaluate <capture.csv> | mispricing-scan [--dry-run] | mispricing-clv | mispricing-settle | clv-report | clv-calibrate | research-status | value-flow-report | data-health | data-health-fix | reports-prune [--keep=N] | profitability-report | calibration-report | staking-sim [--bankroll=N --policy=flat|flat_pct|kelly10|kelly25 --max-stake=N] | daily-decision-report | profit-engine [--bankroll=N --max-stake=N] | forensic-audit [--max-credits=N] | telegram-test>\n" +
         `unknown command: ${command ?? ""}\n`,
     );
     return 1;
