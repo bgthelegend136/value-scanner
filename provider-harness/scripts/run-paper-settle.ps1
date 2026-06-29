@@ -7,14 +7,19 @@ $LogPath = Join-Path $LogDir "paper-settle-$Stamp.log"
 
 # Settlement: update completed paper bets and sent Telegram alerts from final
 # scores. Sends nothing to Telegram and never touches the Telegram alert floor.
-# fd-settle runs first to settle soccer for FREE via football-data.org, so the
-# subsequent The Odds API `settle` only spends credits on non-soccer leftovers.
+# fd-settle (soccer) and espn-settle (non-soccer + non-fd soccer) run first to
+# settle for FREE, so the subsequent The Odds API `settle` only spends credits on
+# whatever neither free source could cover.
 Push-Location $HarnessRoot
 try {
   Start-Transcript -Path $LogPath -Append | Out-Null
   node src/cli.mjs fd-settle
   if ($LASTEXITCODE -ne 0) {
     throw "fd-settle exited with code $LASTEXITCODE"
+  }
+  node src/cli.mjs espn-settle
+  if ($LASTEXITCODE -ne 0) {
+    throw "espn-settle exited with code $LASTEXITCODE"
   }
   node src/cli.mjs settle
   if ($LASTEXITCODE -ne 0) {
