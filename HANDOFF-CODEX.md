@@ -34,6 +34,64 @@ Boost tooling is a manual decision aid. It may analyze wider markets, but it mus
 
 ## 2. Current state
 
+> **Status update 2026-06-29 (repair & reliability session — Phases 0–2, Way B,
+> Phase 3 ×3 increments, US/Betsson plan approved).** Active branch is
+> **`codex/post-paid-roadmap`** (NOT `master`; the header above is historical).
+> **316 tests green**, 0 API credits spent this session, working tree clean, all
+> pushed. Plan executed: `~/.claude/plans/sunny-coalescing-dahl.md`. The live
+> Telegram path is unchanged throughout (same `confirmCandidate`, **5% floor**,
+> same payload).
+>
+> **What changed (commits on this branch):**
+> - **Fixes:** dedup alerts by matched *reference* event (`alertIdentity`);
+>   exclude `pamestoixima` from consensus depth (a book under test can't self-confirm).
+> - **Free settlement:** new `espn-settle` (keyless ESPN public scoreboard) for
+>   leagues football-data.org doesn't cover — `src/espn_client.mjs` +
+>   `src/espn_settle.mjs`, wired into `scripts/run-paper-settle.ps1` after `fd-settle`.
+> - **Outcome calibration:** new `outcome-calibration-report` measures calibration
+>   of our OWN settled bets (Brier/log-loss/classwise-ECE/win-rate-gap, VALUE vs
+>   CONTROL) — `src/outcome_calibration.mjs`. First read: VALUE h2h gap **+7.0%**
+>   (win 60.7% vs implied 53.7%, n=84) vs CONTROL +4.0% → honest separation ~3pp,
+>   not yet proof. Surfaced in the daily decision report.
+> - **Paper methods (offline only):** `devigOoEpc` + `devigFlGlm` in `value.mjs`;
+>   historical calibration now scores `oo_epc` + train-fitted `fl_glm` + RPS +
+>   classwise-ECE + expected-vs-actual draw counts (Goto/Baboota draw-bias check).
+> - **Way B — scan scope:** `src/scan_scope.mjs` skips unsettleable non-edge sports
+>   (boxing/MMA/cricket/KBO/NPB) in `scan`; `--include-all-sports` overrides.
+> - **`reports-prune`** retention command + `src/reports_prune.mjs`.
+> - **Phase 3 (cli split), 3 increments:** `src/commands/boost.mjs`,
+>   `src/commands/reports.mjs`, and shared helpers in `src/cli_shared.mjs`.
+>   **`cli.mjs`: 2,666 → 2,262 lines.** Behaviour identical.
+>
+> **Key findings (honest):**
+> - **The Odds API credits: 1,896 / 20,000 left until the 1 Jul reset** (free
+>   `/v4/sports` check). Anything credit-hungry (historical, US markets) waits.
+> - **Settlement is mostly future, not stuck:** of 1,302 PENDING only ~99 are
+>   past/playable; the rest are unplayed (WC in progress, NFL/NCAAF upcoming). The
+>   200-gate is gated by **time**, not a settle tool.
+> - **Neither API can backtest the real edge:** The Odds API historical has the
+>   deep archive but no soft books; Odds-API.io has soft books live but only
+>   `/odds/movements` (per-event trail), not a season archive. The edge is proven
+>   only forward (settled paper + CLV).
+>
+> **NEXT STEPS (priority order):**
+> 1. **Finish Phase 3** (free, no credits): extract remaining `cli.mjs` command
+>    groups into `src/commands/` — **paper-pipeline** (scan/settle/fd-settle/
+>    espn-settle/clv) is the biggest win, then **mispricing**, **manual-worksheet**,
+>    **live/sweep**. One commit per group, run `npm test` after each.
+> 2. **Way A (cheap, optional):** capture soft-book line decay via Odds-API.io
+>    `GET /odds/movements` (its quota, not the 20k) — better CLV signal than the
+>    Pinnacle-only multi-snapshot, which conflicts with the deliberate single-capture
+>    design and costs The Odds API credits.
+> 3. **After 1 Jul reset (fresh 20k):** execute the approved US/Betsson one-API
+>    validation track — `docs/superpowers/plans/2026-06-29-us-betsson-validation-track.md`.
+>    Re-build the one-API path in `src/commands/` (do NOT merge the divergent
+>    `codex/betsson-single-api-poc` branch); run a Betsson historical backtest
+>    (~3,800 cr) for the first real out-of-sample edge proof; year-round US paper
+>    via the free ESPN settlement.
+> 4. **Hold the floor-calibration / go-live decision** until VALUE h2h settled ≥200
+>    with CLV>0, VALUE beats CONTROL, and low outcome-ECE.
+
 > **Status update 2026-06-28 (The Odds API-first collection block executed).**
 > Ran the The Odds API-first plan instead of spending more time on live
 > Odds-API.io debugging. Fixed `theodds-sweep --markets=h2h` so a sport-level

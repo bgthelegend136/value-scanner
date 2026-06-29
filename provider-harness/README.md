@@ -203,8 +203,13 @@ A per-stratum summary CSV is written to `reports/`.
 ### `scan`
 
 ```
-node src/cli.mjs scan [--edge=2]
+node src/cli.mjs scan [--edge=2] [--include-all-sports]
 ```
+
+By default the scan **skips sports with no free settlement source and no
+soft-book edge** (boxing, MMA, cricket, KBO, NPB) — paper bets there only rot as
+permanent `PENDING` noise in ROI/calibration (see `src/scan_scope.mjs`). Pass
+`--include-all-sports` to scan them anyway.
 
 Finds **positive-EV value bets** across **every in-season league mapped in
 `config/multisport-map.json`** (World Cup, Brazil Série A/B, EPL, Serie A,

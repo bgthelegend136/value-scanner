@@ -76,14 +76,16 @@ node --test
 
 Όταν τελειώσουν οι αγώνες, τρέξε:
 ```powershell
-node src/cli.mjs fd-settle   # ΔΩΡΕΑΝ: settle soccer/Μουντιάλ μέσω football-data.org
-node src/cli.mjs settle      # The Odds API: μόνο για τα non-soccer που μένουν
+node src/cli.mjs fd-settle    # ΔΩΡΕΑΝ: settle soccer/Μουντιάλ μέσω football-data.org
+node src/cli.mjs espn-settle  # ΔΩΡΕΑΝ: NFL/NCAAF/NBA/WNBA/MLB/AFL + Libertadores/Sudamericana/China/Brazil B μέσω ESPN
+node src/cli.mjs settle       # The Odds API: μόνο ό,τι δεν κάλυψαν οι δωρεάν πηγές
 ```
 Το **`fd-settle`** κλείνει τα soccer στοιχήματα **δωρεάν** (football-data.org,
-χωρίς The Odds API credits) — τρέξ' το **πρώτα**. Μετά το `settle` τραβάει σκορ
-μόνο για ό,τι δεν καλύπτει το football-data (π.χ. baseball/NFL). Και τα δύο βρίσκουν
-WON/LOST/PUSH και τυπώνουν **πραγματικό ROI**. Έτσι βλέπεις αν τα +EV σήματα όντως
-αποδίδουν — μέσα στις μέρες του Μουντιάλ.
+χωρίς The Odds API credits) — τρέξ' το **πρώτα**. Το **`espn-settle`** κλείνει
+**δωρεάν** (χωρίς key) ό,τι δεν καλύπτει το football-data: τα US αθλήματα και τα
+non-fd soccer cups. Μετά το `settle` τραβάει σκορ από The Odds API μόνο για ό,τι
+έμεινε. Και τα τρία βρίσκουν WON/LOST/PUSH και τυπώνουν **πραγματικό ROI**. Έτσι
+βλέπεις αν τα +EV σήματα όντως αποδίδουν.
 
 ⚠️ Είναι **paper** (χάρτινο) μέτρημα, όχι απόδειξη μελλοντικού κέρδους. Στα νοκ-άουτ,
 το σκορ μπορεί να περιλαμβάνει παράταση — προσοχή σε τέτοιες περιπτώσεις.
@@ -107,6 +109,11 @@ CLV captured: 3 | Beat rate: 100.0% | Avg CLV: +3.5%
 - `node src/cli.mjs events` — λίστα αγώνων.
 - `node src/cli.mjs capture <eventId>` — φύλλο για χειροκίνητη σύγκριση τιμών.
 - `node src/cli.mjs evaluate <capture.csv>` — αξιολόγηση χειροκίνητων παρατηρήσεων.
+- `node src/cli.mjs outcome-calibration-report` — **(δωρεάν, offline)** πόσο καλά οι
+  εκτιμώμενες πιθανότητές μας ταιριάζουν με τα **πραγματικά** αποτελέσματα των δικών
+  μας settled bets (Brier/log-loss/ECE + «win-rate vs implied»). Δείχνει VALUE vs
+  CONTROL — η ουσιαστική απόδειξη edge όταν φτάσουμε στα 200 settled.
+- `node src/cli.mjs reports-prune [--keep=8]` — καθαρίζει τα παλιά snapshot reports.
 
 ---
 
