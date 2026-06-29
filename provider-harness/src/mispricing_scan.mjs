@@ -5,6 +5,7 @@ import { confirmCandidate } from "./mispricing_confirm.mjs";
 import {
   buildClvTrackingRow,
   candidateIdentity,
+  alertIdentity,
   mergeClvLedger,
   mergeQueue,
   selectSportGroups,
@@ -329,8 +330,10 @@ export async function runMispricingScan({
             continue;
           }
           summary.confirmed += 1;
-          const identity = identityOf(candidate);
-          if (dryRun || !shouldSendAlert(deliveredByIdentity.get(identity), confirmation)) continue;
+          const identity = alertIdentity(candidate, confirmation);
+          const previousAlert = deliveredByIdentity.get(identity) ??
+            deliveredByIdentity.get(identityOf(candidate));
+          if (dryRun || !shouldSendAlert(previousAlert, confirmation)) continue;
           try {
             const telegram = await telegramClient.sendMispricing(candidate, confirmation);
             delivered.push({

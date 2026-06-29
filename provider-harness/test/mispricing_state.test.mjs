@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  alertIdentity,
   buildClvTrackingRow,
   candidateIdentity,
   createMispricingState,
@@ -30,6 +31,16 @@ test("candidate identity includes event, bookmaker, market, line, and outcome", 
   assert.equal(
     candidateIdentity(candidate()),
     "501|Stoiximan|MATCH_RESULT||1",
+  );
+});
+
+test("alert identity uses the matched reference event instead of the provider event", () => {
+  assert.equal(
+    alertIdentity(
+      candidate({ providerEventId: "provider-a" }),
+      { referenceEventId: "ref-501" },
+    ),
+    "ref-501|Stoiximan|MATCH_RESULT||1",
   );
 });
 
@@ -84,7 +95,7 @@ test("builds a PENDING CLV tracking row from a candidate and confirmation", () =
     { referenceEventId: "ref-501", pinnacleFairProbability: 0.416667 },
     { sentAt: "2026-06-25T09:00:00Z" },
   );
-  assert.equal(row.identity, "501|Stoiximan|MATCH_RESULT||1");
+  assert.equal(row.identity, "ref-501|Stoiximan|MATCH_RESULT||1");
   assert.equal(row.referenceEventId, "ref-501");
   assert.equal(row.sportKey, "soccer_fifa_world_cup");
   assert.equal(row.decimalOdds, "2.4000");
@@ -104,7 +115,7 @@ test("CLV ledger round-trips tracking rows and merges new identities only", asyn
   await state.writeClvLedger([first]);
   const restored = await state.readClvLedger();
   assert.equal(restored.length, 1);
-  assert.equal(restored[0].identity, "501|Stoiximan|MATCH_RESULT||1");
+  assert.equal(restored[0].identity, "ref-501|Stoiximan|MATCH_RESULT||1");
   assert.equal(restored[0].status, "PENDING");
   assert.equal(restored[0].decimalOdds, "2.4000");
 
@@ -117,7 +128,7 @@ test("CLV ledger round-trips tracking rows and merges new identities only", asyn
   assert.equal(merged.length, 2);
   assert.deepEqual(
     merged.map((row) => row.identity).sort(),
-    ["501|Stoiximan|MATCH_RESULT||1", "777|Stoiximan|MATCH_RESULT||2"].sort(),
+    ["ref-501|Stoiximan|MATCH_RESULT||1", "ref-777|Stoiximan|MATCH_RESULT||2"].sort(),
   );
 });
 

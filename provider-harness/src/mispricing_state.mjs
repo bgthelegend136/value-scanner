@@ -41,6 +41,13 @@ export function candidateIdentity(row) {
   ].join("|");
 }
 
+export function alertIdentity(row, confirmation = {}) {
+  return [
+    confirmation.referenceEventId ?? row.referenceEventId ?? row.providerEventId,
+    row.bookmaker, row.market, String(row.line ?? ""), row.outcome,
+  ].join("|");
+}
+
 export function sportGroupKey(row) {
   return row.referenceSource ? `${row.referenceSource}|${row.sportKey}` : row.sportKey;
 }
@@ -88,7 +95,7 @@ export function selectSportGroups(rows, { maxSports = 2 } = {}) {
 // *closing* line (see paper.mjs applyClosingLine).
 export function buildClvTrackingRow(candidate, confirmation, { sentAt }) {
   return {
-    identity: candidateIdentity(candidate),
+    identity: alertIdentity(candidate, confirmation),
     sentAt,
     referenceSource: candidate.referenceSource || "the-odds-api",
     referenceEventId: String(confirmation.referenceEventId),
