@@ -258,16 +258,21 @@ odds, EV, tier, and timestamp are retained.
 Settle completed bets with:
 
 ```text
-node src/cli.mjs fd-settle   # FREE: settles soccer/World Cup via football-data.org
-node src/cli.mjs settle      # The Odds API: settles the non-soccer remainder
+node src/cli.mjs fd-settle    # FREE: settles soccer/World Cup via football-data.org
+node src/cli.mjs espn-settle  # FREE: settles non-fd leagues via ESPN public scoreboard
+node src/cli.mjs settle       # The Odds API: settles whatever the free sources cannot
 ```
 
 `fd-settle` settles soccer paper bets for **free** via football-data.org
 (`football_data_org_key`, 10 req/min), matching on normalized team names + date,
-so The Odds API credits stay reserved for CLV. Run it before `settle`. `settle`
-then requests scores for any league football-data does not cover (Brazil Série B,
-baseball, NFL, …), updates `PENDING` bets to `WON`, `LOST`, `PUSH`, or `REVIEW`,
-and prints settled stake, net paper profit, and realized ROI:
+so The Odds API credits stay reserved for CLV. `espn-settle` then settles the
+leagues football-data does not cover — **free, no key** — via ESPN's public
+scoreboard (NFL, NCAAF, NBA/WNBA, MLB, AFL, and non-fd soccer such as
+Libertadores, Sudamericana, China SL, Brazil Série B). Combat sports, cricket,
+KBO and NPB are not two-team-scored on ESPN, so they stay for manual review. Run
+both free settlers before `settle`. `settle` then requests scores for any
+remaining league via The Odds API, updates `PENDING` bets to `WON`, `LOST`,
+`PUSH`, or `REVIEW`, and prints settled stake, net paper profit, and realized ROI:
 
 `ROI = settled paper profit / settled paper stake`
 
@@ -294,6 +299,29 @@ fair line. Positive CLV means you beat the close, the strongest fast signal that
 the edge was real, available **before** any result. It prints the capture count,
 positive-CLV count, beat rate, and average CLV. Costs ~2 The Odds API credits;
 re-running closer to kickoff overwrites each pending bet with the latest line.
+
+### Calibration & maintenance reports (offline, 0 credits)
+
+```text
+node src/cli.mjs outcome-calibration-report   # calibration of our own settled bets
+node src/cli.mjs reports-prune [--keep=8]      # cap accumulated snapshot reports
+```
+
+`outcome-calibration-report` measures how well our de-vigged fair probabilities
+match **realized** paper-bet outcomes (the Walsh & Joshi test on our own edge,
+not the sharp-side historical proxy). For every settled bet it takes the backed
+selection's `fairProbability` as the prediction and whether it won as the
+outcome, and writes Brier, log-loss, classwise-ECE, reliability bins, and the
+win-rate-vs-implied gap to `reports/outcome-calibration.{json,csv}`, bucketed by
+tier (VALUE vs CONTROL), odds, market, and sport. A positive VALUE gap that
+exceeds CONTROL is the calibration evidence the go-live decision needs; ECE is
+only meaningful once the sample is large, so read the gap first at low n.
+
+The read-only historical de-vig calibration (`scripts/historical-calibration.mjs`)
+now also scores `oo_epc` (OO-EPC) and a train-fitted `fl_glm` (FL-GLM) alongside
+multiplicative/shin/power/consensus, and reports RPS, classwise-ECE, and
+expected-vs-actual draw counts to expose the favourite-longshot draw bias. These
+are **offline experiments only** — the live alert path still uses power de-vig.
 
 ## Manual worksheet workflow
 
