@@ -63,6 +63,66 @@ export function devigPower(referenceSelections) {
   return fair;
 }
 
+// Odds-Only-Equal-Profitability-Confidence (Goto et al., 2024, Algorithm 5).
+// Reduces every inverse odd by the same number of standard errors z so the
+// probabilities sum to the number of winning outcomes (t = 1 for 1X2 / 2-way
+// moneyline / totals). Aligns with the bookmaker's equal-profit objective. If
+// any probability would go non-positive (booksum barely above 1), it falls back
+// to multiplicative for that market — exactly as the paper specifies. OFFLINE
+// challenger only; not wired into the live confirmation path.
+export function devigOoEpc(referenceSelections) {
+  const groups = new Map();
+  for (const selection of referenceSelections) {
+    const groupKey = `${selection.market}|${selection.line}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(selection);
+  }
+  const fair = new Map();
+  for (const selections of groups.values()) {
+    const implied = selections.map((s) => 1 / s.decimalOdds);
+    const booksum = implied.reduce((sum, p) => sum + p, 0);
+    if (booksum <= 1) continue;
+    const t = 1;
+    const se = implied.map((x) => Math.sqrt(x * (1 - x)) / x);
+    const sumSe = se.reduce((sum, value) => sum + value, 0);
+    const z = sumSe > 0 ? (booksum - t) / sumSe : Infinity;
+    const adjusted = implied.map((x, index) => x - z * se[index]);
+    const usable = Number.isFinite(z) && adjusted.every((p) => p > 0);
+    selections.forEach((s, index) => {
+      const probability = usable ? adjusted[index] : implied[index] / booksum;
+      fair.set(`${s.market}|${s.line}|${s.outcome}`, probability);
+    });
+  }
+  return fair;
+}
+
+// Favourite-Longshot-Bias-Adjusted GLM (Goto et al., 2024, Algorithm 6): raise
+// inverse odds to a fitted power beta, then multiplicatively normalise. beta = 1
+// is exactly the multiplicative method; beta > 1 disproportionately shrinks
+// longshots to correct the favourite-longshot bias. beta is fitted on a training
+// split by the historical calibration harness; passing it in keeps this a pure
+// transform. OFFLINE challenger only.
+export function devigFlGlm(referenceSelections, { beta = 1 } = {}) {
+  const groups = new Map();
+  for (const selection of referenceSelections) {
+    const groupKey = `${selection.market}|${selection.line}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(selection);
+  }
+  const fair = new Map();
+  for (const selections of groups.values()) {
+    const implied = selections.map((s) => 1 / s.decimalOdds);
+    if (implied.reduce((sum, p) => sum + p, 0) <= 1) continue;
+    const powered = implied.map((x) => x ** beta);
+    const sum = powered.reduce((total, value) => total + value, 0);
+    if (!(sum > 0)) continue;
+    selections.forEach((s, index) => {
+      fair.set(`${s.market}|${s.line}|${s.outcome}`, powered[index] / sum);
+    });
+  }
+  return fair;
+}
+
 export function consensusFairProbabilities(referenceSelections) {
   const byBook = new Map();
   for (const selection of referenceSelections) {

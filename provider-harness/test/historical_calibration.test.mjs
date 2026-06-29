@@ -41,6 +41,32 @@ test("historical calibration scores methods on a temporal out-of-sample split", 
   assert.equal(power.validate.reliability.reduce((sum, bin) => sum + bin.count, 0), 6);
 });
 
+test("scoring adds a fitted fl_glm and per-method draw-bias / RPS / classwise-ECE metrics", () => {
+  const rows = [];
+  for (let i = 0; i < 6; i += 1) {
+    const probabilities = { 1: 0.5, X: 0.27, 2: 0.23 };
+    const actual = i % 3 === 0 ? "X" : (i % 2 === 0 ? "1" : "2");
+    for (const method of ["multiplicative", "power", "oo_epc"]) {
+      rows.push(event(String(i), `2025-08-0${i + 1}T14:00:00Z`, method, { ...probabilities }, actual));
+    }
+  }
+
+  const report = scoreCalibrationRows(rows, { bins: 5 });
+  const names = report.methods.map((item) => item.method);
+  assert.ok(names.includes("oo_epc"));
+  assert.ok(names.includes("fl_glm"));
+
+  const flGlm = report.methods.find((item) => item.method === "fl_glm");
+  assert.ok(Number.isFinite(flGlm.beta));
+
+  for (const method of report.methods) {
+    assert.ok(Number.isFinite(method.validate.rps));
+    assert.ok(Number.isFinite(method.validate.classwiseEce));
+    assert.ok(Number.isFinite(method.validate.expectedDraws));
+    assert.ok(Number.isInteger(method.validate.actualDraws));
+  }
+});
+
 test("historical calibration helpers filter finished outcome coverage and pick pre-kickoff snapshots", () => {
   const matches = filterFinishedMatches([
     {

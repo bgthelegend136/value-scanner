@@ -15,7 +15,7 @@ import { createFootballDataClient } from "../src/football_data_client.mjs";
 import { fdCompetitionFor } from "../src/football_data_settle.mjs";
 import { createTheOddsApiClient } from "../src/theodds_client.mjs";
 import { normalizeTheOddsResponse } from "../src/theodds_normalize.mjs";
-import { consensusFairProbabilities, devig, devigPower } from "../src/value.mjs";
+import { consensusFairProbabilities, devig, devigOoEpc, devigPower } from "../src/value.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPORTS_DIR = resolve(HERE, "..", "reports");
@@ -30,6 +30,7 @@ const FD_COMPETITION_SPORT_KEYS = new Map([
 const CSV_COLUMNS = [
   "rowType", "method", "split", "events", "outcomeRows",
   "brier", "logLoss", "baselineBrier", "baselineLogLoss",
+  "rps", "classwiseEce", "expectedDraws", "actualDraws", "beta",
   "bin", "lower", "upper", "count", "avgPredicted", "observedRate",
 ];
 
@@ -181,6 +182,7 @@ function predictionsForEvent(eventPayload, match, receivedAt, snapshotAt) {
     ["multiplicative", devig(pinnacle)],
     ["shin", devigShin(pinnacle)],
     ["power", devigPower(pinnacle)],
+    ["oo_epc", devigOoEpc(pinnacle)],
   ];
   for (const [method, fairMap] of methodMaps) {
     const probabilities = fairMapToProbabilities(fairMap);
@@ -405,23 +407,128 @@ function reliability(rows, bins) {
   }));
 }
 
+const RPS_ORDER = ["1", "X", "2"];
+
+// Ranked probability score for an ordered 1X2 forecast (Baboota & Kaur, 2018):
+// rewards getting both the location and the spread of the distribution right.
+function rankedProbabilityScore(row) {
+  let cumulativePredicted = 0;
+  let cumulativeObserved = 0;
+  let sum = 0;
+  for (let i = 0; i < RPS_ORDER.length - 1; i += 1) {
+    cumulativePredicted += row.probabilities[RPS_ORDER[i]];
+    cumulativeObserved += row.actualOutcome === RPS_ORDER[i] ? 1 : 0;
+    sum += (cumulativePredicted - cumulativeObserved) ** 2;
+  }
+  return sum / (RPS_ORDER.length - 1);
+}
+
+// classwise-ECE (Kull et al., 2019; Walsh & Joshi, 2024): mean over the three
+// one-vs-rest classes of each class's size-weighted |avg predicted − observed|.
+function classwiseEce(rows, bins) {
+  if (rows.length === 0) return null;
+  let total = 0;
+  for (const outcome of OUTCOMES) {
+    const buckets = Array.from({ length: bins }, () => ({ count: 0, predicted: 0, observed: 0 }));
+    for (const row of rows) {
+      const probability = row.probabilities[outcome];
+      const index = Math.min(bins - 1, Math.floor(probability * bins));
+      buckets[index].count += 1;
+      buckets[index].predicted += probability;
+      buckets[index].observed += row.actualOutcome === outcome ? 1 : 0;
+    }
+    let ece = 0;
+    for (const bucket of buckets) {
+      if (bucket.count === 0) continue;
+      ece += (bucket.count / rows.length) *
+        Math.abs(bucket.predicted / bucket.count - bucket.observed / bucket.count);
+    }
+    total += ece;
+  }
+  return total / OUTCOMES.length;
+}
+
+// Draw-bias check (Goto et al., 2024, Fig. 1): expected vs actual number of draws.
+// FL-bias-adjusting methods (power, shin, oo_epc, fl_glm) tend to under-count them.
+function extraMetrics(rows, bins) {
+  if (rows.length === 0) {
+    return { rps: null, classwiseEce: null, expectedDraws: null, actualDraws: null };
+  }
+  const rps = rows.reduce((sum, row) => sum + rankedProbabilityScore(row), 0) / rows.length;
+  const expectedDraws = rows.reduce((sum, row) => sum + row.probabilities.X, 0);
+  const actualDraws = rows.reduce((sum, row) => sum + (row.actualOutcome === "X" ? 1 : 0), 0);
+  return { rps, classwiseEce: classwiseEce(rows, bins), expectedDraws, actualDraws };
+}
+
+// FL-GLM applied to already-de-vigged multiplicative probabilities: powering the
+// normalised probabilities by beta and renormalising is algebraically identical
+// to powering the raw inverse odds (the multiplicative normaliser cancels).
+function flGlmRow(row, beta) {
+  const powered = OUTCOMES.map((outcome) => row.probabilities[outcome] ** beta);
+  const sum = powered.reduce((total, value) => total + value, 0);
+  const probabilities = Object.fromEntries(OUTCOMES.map((outcome, index) => [outcome, powered[index] / sum]));
+  return { ...row, method: "fl_glm", probabilities };
+}
+
+// Fit the single FL-GLM power constant on the TRAIN split only (minimise train
+// log-loss); validation outcomes are never used, avoiding leakage.
+function fitFlGlmBeta(trainRows) {
+  const loss = (beta) => trainRows.reduce((sum, row) => {
+    const transformed = flGlmRow(row, beta);
+    return sum - Math.log(Math.max(transformed.probabilities[row.actualOutcome], EPSILON));
+  }, 0) / Math.max(1, trainRows.length);
+  let best = 1;
+  let bestLoss = Infinity;
+  for (let beta = 0.5; beta <= 2.5001; beta += 0.01) {
+    const value = loss(beta);
+    if (value < bestLoss) {
+      bestLoss = value;
+      best = beta;
+    }
+  }
+  return Math.round(best * 100) / 100;
+}
+
 export function scoreCalibrationRows(rows, { bins = 10 } = {}) {
   const methods = [];
+  const splits = new Map();
   for (const [method, methodRows] of groupBy(rows, (row) => row.method)) {
     const sorted = [...methodRows].sort((a, b) => new Date(a.kickoffUtc) - new Date(b.kickoffUtc));
     const splitAt = Math.max(1, Math.floor(sorted.length / 2));
     const trainRows = sorted.slice(0, splitAt);
     const validateRows = sorted.slice(splitAt);
+    splits.set(method, { trainRows, validateRows });
     const baseline = baselineFromTrain(trainRows);
     methods.push({
       method,
       train: metricSummary(trainRows),
       validate: {
         ...metricSummary(validateRows, baseline),
+        ...extraMetrics(validateRows, bins),
         reliability: reliability(validateRows, bins),
       },
     });
   }
+
+  // FL-GLM: fit beta on the multiplicative train split, then apply to both splits.
+  const multiplicative = splits.get("multiplicative");
+  if (multiplicative && multiplicative.trainRows.length > 0) {
+    const beta = fitFlGlmBeta(multiplicative.trainRows);
+    const trainFl = multiplicative.trainRows.map((row) => flGlmRow(row, beta));
+    const validateFl = multiplicative.validateRows.map((row) => flGlmRow(row, beta));
+    const baseline = baselineFromTrain(multiplicative.trainRows);
+    methods.push({
+      method: "fl_glm",
+      beta,
+      train: metricSummary(trainFl),
+      validate: {
+        ...metricSummary(validateFl, baseline),
+        ...extraMetrics(validateFl, bins),
+        reliability: reliability(validateFl, bins),
+      },
+    });
+  }
+
   methods.sort((a, b) => a.method.localeCompare(b.method));
   return {
     generatedAt: new Date().toISOString(),
@@ -449,6 +556,7 @@ export function calibrationCsvRows(report) {
       logLoss: csvValue(method.train.logLoss),
       baselineBrier: "",
       baselineLogLoss: "",
+      beta: method.beta === undefined ? "" : csvValue(method.beta),
     });
     rows.push({
       rowType: "summary",
@@ -460,6 +568,11 @@ export function calibrationCsvRows(report) {
       logLoss: csvValue(method.validate.logLoss),
       baselineBrier: csvValue(method.validate.baselineBrier),
       baselineLogLoss: csvValue(method.validate.baselineLogLoss),
+      rps: csvValue(method.validate.rps),
+      classwiseEce: csvValue(method.validate.classwiseEce),
+      expectedDraws: csvValue(method.validate.expectedDraws),
+      actualDraws: csvValue(method.validate.actualDraws),
+      beta: method.beta === undefined ? "" : csvValue(method.beta),
     });
     for (const bin of method.validate.reliability) {
       rows.push({
