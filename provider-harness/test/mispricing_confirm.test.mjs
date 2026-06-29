@@ -158,6 +158,18 @@ test("rejects fewer than three consensus books, stale Pinnacle, and missing Pinn
   }
 });
 
+test("excludes the target Greek books from the consensus depth", () => {
+  const rows = [
+    ...market3("pinnacle", 1.5, 4.2, 6.5),
+    ...market3("betsson", 1.52, 4.1, 6.3),
+    ...market3("unibet", 1.49, 4.3, 6.6),
+    ...market3("pamestoixima", 1.51, 4.15, 6.4),
+  ];
+  const result = confirmCandidate(footballHome, referenceEvent, rows, { now });
+  assert.equal(result.status, "REJECTED");
+  assert.equal(result.reason, "INSUFFICIENT_CONSENSUS");
+});
+
 test("rejects an incomplete football 1X2 market with no draw", () => {
   const rows = [
     { bookmaker: "pinnacle", eventId: "ref-501", market: "MATCH_RESULT", line: "", outcome: "1", decimalOdds: 1.5, quoteUpdatedAt: "2026-06-25T08:58:00Z" },

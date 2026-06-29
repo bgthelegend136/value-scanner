@@ -47,4 +47,10 @@ export const CLV_CAPTURE_WINDOW_MS = 20 * 60 * 1000;
 //                            anchor (pinnacle) and the two target books whose
 //                            own price is the thing under test.
 export const MAX_QUOTE_AGE_MS = 10 * 60 * 1000;
-export const CONSENSUS_EXCLUDED_BOOKS = new Set(["pinnacle", "stoiximan", "superbet", "novibet"]);
+export const CONSENSUS_EXCLUDED_BOOKS = new Set([
+  "pinnacle",
+  "stoiximan",
+  "pamestoixima",
+  "superbet",
+  "novibet",
+]);
